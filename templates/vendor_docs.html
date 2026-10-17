@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Vendor Docs{% endblock %}
+
+{% block content %}
+<section class="workspace">
+  <div class="page-nav">
+    <a href="{{ url_for('index') }}" class="back-link">← Back to console</a>
+  </div>
+
+  <div class="workspace-intro">
+    <h1>Vendor Document Pack</h1>
+    <p>Vendor name and at least one document are required. Attach MSME, PAN, Aadhaar, and/or other docs — AI extracts fields and stores them with source <code>AI-Extracted</code>.</p>
+  </div>
+
+  <form
+    action="{{ url_for('vendor_docs') }}"
+    method="post"
+    enctype="multipart/form-data"
+    class="panel panel-primary vendor-form"
+  >
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-label">Intake Form</span>
+        <h2 class="panel-title">Vendor Details &amp; Documents</h2>
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <div class="field">
+        <label for="vendor_name">Vendor name</label>
+        <input
+          type="text"
+          id="vendor_name"
+          name="vendor_name"
+          value="{{ form_data.get('vendor_name', '') }}"
+          placeholder="e.g. Acme Supplies Pvt Ltd"
+          required
+        />
+      </div>
+
+      <div class="field">
+        <label for="rfp_no">RFP No.</label>
+        <input
+          type="text"
+          id="rfp_no"
+          name="rfp_no"
+          value="{{ form_data.get('rfp_no', '') }}"
+          placeholder="e.g. RFP-2026-0142 (optional)"
+          autocomplete="off"
+        />
+      </div>
+    </div>
+
+    <div class="doc-grid">
+      <label class="doc-card" for="msme">
+        <span class="doc-card-label">Upload MSME</span>
+        <span class="doc-card-hint">Certificate / registration</span>
+        <input type="file" id="msme" name="msme" data-preview="msme-preview" />
+        <span class="file-name" id="msme-preview">No file selected</span>
+      </label>
+
+      <label class="doc-card" for="pan">
+        <span class="doc-card-label">Upload PAN</span>
+        <span class="doc-card-hint">PAN card scan / PDF</span>
+        <input type="file" id="pan" name="pan" data-preview="pan-preview" />
+        <span class="file-name" id="pan-preview">No file selected</span>
+      </label>
+
+      <label class="doc-card" for="aadhar">
+        <span class="doc-card-label">Upload Aadhaar</span>
+        <span class="doc-card-hint">Aadhaar card scan / PDF</span>
+        <input type="file" id="aadhar" name="aadhar" data-preview="aadhar-preview" />
+        <span class="file-name" id="aadhar-preview">No file selected</span>
+      </label>
+
+      <label class="doc-card doc-card-wide" for="other_docs">
+        <span class="doc-card-label">Other docs</span>
+        <span class="doc-card-hint">Multiple attachments allowed · optional</span>
+        <input type="file" id="other_docs" name="other_docs" multiple data-preview="other-preview" />
+        <span class="file-name" id="other-preview">No files selected</span>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <a href="{{ url_for('index') }}" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-primary">Submit Vendor Pack</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

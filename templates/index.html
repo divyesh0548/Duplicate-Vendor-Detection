@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Workspace{% endblock %}
+
+{% block content %}
+<section class="workspace">
+  <div class="workspace-intro">
+    <h1>Operations Console</h1>
+    <p>Upload the master reference file and vendor document packs, then run detection.</p>
+  </div>
+
+  <div class="panel panel-primary" data-tabs>
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-label">Step 01</span>
+        <h2 class="panel-title">Source Inputs</h2>
+      </div>
+      <div class="panel-badge {% if master_ready %}badge-ready{% else %}badge-wait{% endif %}">
+        {% if master_ready %}Master loaded{% else %}Awaiting master{% endif %}
+      </div>
+    </div>
+
+    <div class="tab-bar" role="tablist" aria-label="Upload sources">
+      <button
+        type="button"
+        class="tab-btn is-active"
+        role="tab"
+        aria-selected="true"
+        aria-controls="tab-master"
+        id="tab-btn-master"
+        data-tab="master"
+      >
+        <span class="tab-btn-index">A</span>
+        <span class="tab-btn-copy">
+          <strong>Upload Master File</strong>
+          <small>Reference spreadsheet / master list</small>
+        </span>
+      </button>
+      <a
+        class="tab-btn tab-btn-link"
+        role="tab"
+        aria-selected="false"
+        href="{{ url_for('vendor_docs') }}"
+        id="tab-btn-vendor"
+      >
+        <span class="tab-btn-index">B</span>
+        <span class="tab-btn-copy">
+          <strong>Upload Vendor Docs</strong>
+          <small>MSME · PAN · Aadhaar · supporting files</small>
+        </span>
+      </a>
+    </div>
+
+    <div class="tab-panels">
+      <div
+        class="tab-panel is-active"
+        role="tabpanel"
+        id="tab-master"
+        aria-labelledby="tab-btn-master"
+        data-panel="master"
+      >
+        <form action="{{ url_for('upload_master') }}" method="post" enctype="multipart/form-data" class="upload-form">
+          <label class="dropzone" for="master_file" id="master-dropzone">
+            <input type="file" name="master_file" id="master_file" required />
+            <div class="dropzone-visual">
+              <span class="dropzone-icon" aria-hidden="true"></span>
+              <span class="dropzone-title">Drop master file here</span>
+              <span class="dropzone-sub">or click to browse · PDF, Excel, CSV, Word, images</span>
+            </div>
+            <span class="file-name" id="master-file-name">No file selected</span>
+          </label>
+          {% if master_filename %}
+            <div class="inline-meta">
+              <span class="meta-key">Last uploaded</span>
+              <span class="meta-val">{{ master_filename }}</span>
+            </div>
+          {% endif %}
+          <button type="submit" class="btn btn-secondary">Save Master File</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel panel-action">
+    <div class="action-row">
+      <div class="action-copy">
+        <span class="panel-label">Step 02</span>
+        <h2 class="panel-title">Run Process</h2>
+        <p>Scan all vendor rows for duplicate mobile, email, or GST values and flag matches.</p>
+      </div>
+      <form action="{{ url_for('run_process') }}" method="post">
+        <button type="submit" class="btn btn-primary btn-run">
+          <span class="btn-run-glow" aria-hidden="true"></span>
+          Run Process
+        </button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}

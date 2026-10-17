@@ -1,0 +1,12 @@
+Vendor name, RFP No, 
+
+MSME, PAN, other docs.
+
+
+name, Address, mobile, email
+
+Keep outcomes logo
+
+Upload Master file, Upload vendor documents
+
+Run process, button on home page.
