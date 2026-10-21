@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -133,34 +135,104 @@ def init_db(reset: bool = False):
         conn.commit()
 
 
+def _records_to_value_tuples(
+    records: Iterable[Dict[str, Optional[str]]],
+    source_file: Optional[str],
+    source: str,
+) -> List[tuple]:
+    rows: List[tuple] = []
+    for record in records:
+        rows.append(
+            tuple(record.get(col) for col in INSERT_COLUMNS)
+            + (
+                source_file if source_file is not None else record.get("source_file"),
+                record.get("source") or source,
+            )
+        )
+    return rows
+
+
 def insert_vendor_rows(
     records: Iterable[Dict[str, Optional[str]]],
     source_file: Optional[str] = None,
     source: str = SOURCE_EXCEL,
 ) -> int:
-    """Insert vendor rows. Defaults source to 'excel'. No dedupe."""
-    rows: List[tuple] = []
-    columns = list(INSERT_COLUMNS) + ["source_file", "source"]
+    """
+    Bulk-insert vendor rows (fast path for master Excel/CSV).
 
-    for record in records:
-        values = tuple(record.get(col) for col in INSERT_COLUMNS) + (
-            source_file if source_file is not None else record.get("source_file"),
-            record.get("source") or source,
-        )
-        rows.append(values)
-
+    Large batches use PostgreSQL COPY (stdin CSV). Smaller batches use
+    multi-row INSERT via execute_values — both avoid per-row round trips.
+    """
+    rows = _records_to_value_tuples(records, source_file, source)
     if not rows:
         return 0
 
+    columns = list(INSERT_COLUMNS) + ["source_file", "source"]
     col_sql = ", ".join(columns)
-    sql = f"INSERT INTO {TABLE_NAME} ({col_sql}) VALUES %s"
 
     with get_connection() as conn:
         with conn.cursor() as cur:
-            execute_values(cur, sql, rows, page_size=500)
+            if len(rows) >= 50:
+                buf = io.StringIO()
+                writer = csv.writer(buf, lineterminator="\n")
+                for values in rows:
+                    # Empty string -> SQL NULL via COPY NULL ''
+                    writer.writerow(["" if v is None else str(v) for v in values])
+                buf.seek(0)
+                cur.copy_expert(
+                    f"COPY {TABLE_NAME} ({col_sql}) FROM STDIN WITH (FORMAT csv, NULL '')",
+                    buf,
+                )
+            else:
+                execute_values(
+                    cur,
+                    f"INSERT INTO {TABLE_NAME} ({col_sql}) VALUES %s",
+                    rows,
+                    page_size=1000,
+                )
         conn.commit()
 
     return len(rows)
+
+
+def insert_vendor_rows_returning_ids(
+    records: Iterable[Dict[str, Optional[str]]],
+    source_file: Optional[str] = None,
+    source: str = SOURCE_EXCEL,
+) -> List[int]:
+    """Bulk-insert vendor rows and return their new ids (batched RETURNING)."""
+    rows = _records_to_value_tuples(records, source_file, source)
+    if not rows:
+        return []
+
+    columns = list(INSERT_COLUMNS) + ["source_file", "source"]
+    col_sql = ", ".join(columns)
+    sql = f"INSERT INTO {TABLE_NAME} ({col_sql}) VALUES %s RETURNING id"
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            # fetch=True returns all RETURNING rows from batched inserts
+            result = execute_values(cur, sql, rows, page_size=500, fetch=True)
+            ids = [int(r[0]) for r in result] if result else []
+        conn.commit()
+
+    return ids
+
+
+def delete_vendors_by_ids(ids: Iterable[int]) -> int:
+    """Delete vendor_data rows by id. Returns number deleted."""
+    id_list = [int(i) for i in ids]
+    if not id_list:
+        return 0
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {TABLE_NAME} WHERE id = ANY(%s)",
+                (id_list,),
+            )
+            deleted = cur.rowcount
+        conn.commit()
+    return deleted
 
 
 def fetch_all_vendors() -> List[Dict]:
@@ -186,6 +258,29 @@ def count_vendors() -> int:
         with conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM {TABLE_NAME}")
             return int(cur.fetchone()[0])
+
+
+def fetch_vendors_by_ids(ids: Iterable[int]) -> List[Dict]:
+    """Return vendor_data rows for the given ids, ordered by id."""
+    id_list = [int(i) for i in ids]
+    if not id_list:
+        return []
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    id, sr_no, name, contact_person, address, city, state, pincode,
+                    phone, email, pan, gst, msme, rfp_no, bank_name, beneficiary_name,
+                    account_no, ifsc_code, aadhar, source_file, source,
+                    created_at, updated_at
+                FROM {TABLE_NAME}
+                WHERE id = ANY(%s)
+                ORDER BY id
+                """,
+                (id_list,),
+            )
+            return [dict(row) for row in cur.fetchall()]
 
 
 def describe_vendor_data_table() -> List[tuple]:

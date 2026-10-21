@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Document vs Database{% endblock %}
+
+{% block content %}
+<section class="workspace workspace-wide">
+  <div class="page-nav">
+    <a href="{{ url_for('index') }}" class="back-link">← Back to console</a>
+    <a href="{{ url_for('vendor_docs') }}" class="back-link">Upload another document</a>
+  </div>
+
+  <div class="workspace-intro">
+    <h1>Document vs Database</h1>
+    <p>
+      Comparing <strong>{{ results.doc_row_count }}</strong> vendor(s) from the quotation document
+      against the rest of the database ({{ results.total_rows }} other row(s)).
+      Matches are flagged only when vendor names differ (case-insensitive).
+      Turn on fuzzy match to also treat near-identical names as the same vendor.
+    </p>
+  </div>
+
+  <div class="fuzzy-bar panel">
+    <div class="fuzzy-bar-copy">
+      <span class="panel-label">Vendor name filter</span>
+      <strong>Fuzzy name matching</strong>
+      <p>
+        Off by default (show all name-different matches).
+        When on, groups whose vendor names partially match are removed from the list.
+      </p>
+    </div>
+    <div class="fuzzy-bar-controls">
+      <label class="fuzzy-toggle" for="fuzzy-toggle">
+        <input type="checkbox" id="fuzzy-toggle" />
+        <span class="fuzzy-toggle-track" aria-hidden="true"><span class="fuzzy-toggle-thumb"></span></span>
+        <span class="fuzzy-toggle-text" id="fuzzy-toggle-label">Fuzzy match: Off</span>
+      </label>
+      <div class="fuzzy-removed-stat" id="fuzzy-removed-stat" style="display: none;">
+        <span class="warn-icon" aria-hidden="true">⚠</span>
+        <span>
+          Removed by fuzzy match:
+          <strong id="fuzzy-removed-groups">0</strong> groups ·
+          <strong id="fuzzy-removed-rows">0</strong> rows
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="result-summary panel">
+    <div class="summary-stat summary-stat-warn">
+      <span class="summary-label">
+        <span class="warn-icon warn-icon-sm" aria-hidden="true">⚠</span>
+        Matching rows
+      </span>
+      <strong id="stat-flagged-rows"
+        data-default="{{ results.summary.flagged_rows }}"
+        data-fuzzy="{{ results.fuzzy_summary.flagged_rows }}">{{ results.summary.flagged_rows }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Match groups</span>
+      <strong id="stat-group-count"
+        data-default="{{ results.summary.group_count }}"
+        data-fuzzy="{{ results.fuzzy_summary.group_count }}">{{ results.summary.group_count }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Phone · Email · GST · MSME · PAN</span>
+      <strong id="stat-field-counts"
+        data-default="{{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }} · {{ results.summary.msme }} · {{ results.summary.pan }}"
+        data-fuzzy="{{ results.fuzzy_summary.phone }} · {{ results.fuzzy_summary.email }} · {{ results.fuzzy_summary.gst }} · {{ results.fuzzy_summary.msme }} · {{ results.fuzzy_summary.pan }}">
+        {{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }} ·
+        {{ results.summary.msme }} · {{ results.summary.pan }}
+      </strong>
+    </div>
+  </div>
+
+  {% if not results.groups %}
+    <div class="panel panel-clear" id="empty-default">
+      <div class="clear-state">
+        <span class="clear-icon" aria-hidden="true">✓</span>
+        <div>
+          <h2>No matches in database</h2>
+          <p>No shared phone, email, GST, MSME, or PAN with differently named vendors in the database.</p>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="dup-filter-bar">
+      <span class="panel-label">Filter by field</span>
+      <div class="dup-filters" role="tablist">
+        <button type="button" class="dup-filter is-active" data-filter="all">All</button>
+        <button type="button" class="dup-filter" data-filter="phone">Phone</button>
+        <button type="button" class="dup-filter" data-filter="email">Email</button>
+        <button type="button" class="dup-filter" data-filter="gst">GST</button>
+        <button type="button" class="dup-filter" data-filter="msme">MSME</button>
+        <button type="button" class="dup-filter" data-filter="pan">PAN</button>
+      </div>
+    </div>
+
+    <div class="dup-groups" id="dup-groups">
+      {% for group in results.groups %}
+        <article
+          class="dup-group panel"
+          data-field="{{ group.field }}"
+          data-fuzzy-same="{{ '1' if group.fuzzy_name_match else '0' }}"
+        >
+          <header class="dup-group-header">
+            <div class="dup-group-title">
+              <span class="warn-badge">
+                <span class="warn-icon" aria-hidden="true">⚠</span>
+                Match
+              </span>
+              <div>
+                <span class="dup-field-tag">{{ group.field_label }}</span>
+                <h2 class="dup-matched">{{ group.matched_value }}</h2>
+              </div>
+            </div>
+            <span class="dup-count">{{ group.count }} rows</span>
+          </header>
+          <div class="dup-table-wrap">
+            <table class="dup-table">
+              <thead>
+                <tr>
+                  <th>Origin</th>
+                  <th>ID</th>
+                  <th>Vendor</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>GST</th>
+                  <th>MSME</th>
+                  <th>PAN</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in group.rows %}
+                  <tr class="dup-row">
+                    <td>
+                      <span class="source-pill source-{{ 'ai' if row._origin == 'document' else 'excel' }}">
+                        {{ 'Document' if row._origin == 'document' else 'Database' }}
+                      </span>
+                    </td>
+                    <td class="mono">{{ row.id }}</td>
+                    <td><strong>{{ row.name or '—' }}</strong></td>
+                    <td class="{% if group.field == 'phone' %}cell-hit{% endif %}">{{ row.phone or '—' }}</td>
+                    <td class="{% if group.field == 'email' %}cell-hit{% endif %}">{{ row.email or '—' }}</td>
+                    <td class="{% if group.field == 'gst' %}cell-hit{% endif %}">{{ row.gst or '—' }}</td>
+                    <td class="{% if group.field == 'msme' %}cell-hit{% endif %}">{{ row.msme or '—' }}</td>
+                    <td class="{% if group.field == 'pan' %}cell-hit{% endif %}">{{ row.pan or '—' }}</td>
+                    <td>{{ row.source or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+
+    <div class="panel panel-clear" id="empty-fuzzy" hidden>
+      <div class="clear-state">
+        <span class="clear-icon" aria-hidden="true">✓</span>
+        <div>
+          <h2>No remaining matches</h2>
+          <p>After fuzzy name matching, every flagged group collapsed to similar vendor names.</p>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="form-actions" style="padding: 12px 0 0;">
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to console</a>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const fuzzyToggle = document.getElementById("fuzzy-toggle");
+  const fuzzyLabel = document.getElementById("fuzzy-toggle-label");
+  const removedStat = document.getElementById("fuzzy-removed-stat");
+  const removedGroupsEl = document.getElementById("fuzzy-removed-groups");
+  const removedRowsEl = document.getElementById("fuzzy-removed-rows");
+  const emptyFuzzy = document.getElementById("empty-fuzzy");
+  const filters = document.querySelectorAll(".dup-filter");
+  const groups = Array.from(document.querySelectorAll(".dup-group"));
+
+  const flaggedEl = document.getElementById("stat-flagged-rows");
+  const groupCountEl = document.getElementById("stat-group-count");
+  const fieldCountsEl = document.getElementById("stat-field-counts");
+
+  const removedGroupsCount = {{ results.fuzzy_removed.groups }};
+  const removedRowsCount = {{ results.fuzzy_removed.rows }};
+
+  let fieldFilter = "all";
+  let fuzzyOn = false;
+
+  function applyView() {
+    let visible = 0;
+    groups.forEach((g) => {
+      const fieldOk = fieldFilter === "all" || g.getAttribute("data-field") === fieldFilter;
+      const fuzzyOk = !fuzzyOn || g.getAttribute("data-fuzzy-same") !== "1";
+      const show = fieldOk && fuzzyOk;
+      g.hidden = !show;
+      if (show) visible += 1;
+    });
+
+    if (fuzzyLabel) {
+      fuzzyLabel.textContent = fuzzyOn ? "Fuzzy match: On" : "Fuzzy match: Off";
+    }
+    if (removedStat) {
+      removedStat.style.display = fuzzyOn ? "inline-flex" : "none";
+    }
+    if (removedGroupsEl) {
+      removedGroupsEl.textContent = fuzzyOn ? String(removedGroupsCount) : "0";
+    }
+    if (removedRowsEl) {
+      removedRowsEl.textContent = fuzzyOn ? String(removedRowsCount) : "0";
+    }
+    if (flaggedEl) {
+      flaggedEl.textContent = fuzzyOn ? flaggedEl.dataset.fuzzy : flaggedEl.dataset.default;
+    }
+    if (groupCountEl) {
+      groupCountEl.textContent = fuzzyOn ? groupCountEl.dataset.fuzzy : groupCountEl.dataset.default;
+    }
+    if (fieldCountsEl) {
+      fieldCountsEl.textContent = fuzzyOn ? fieldCountsEl.dataset.fuzzy : fieldCountsEl.dataset.default;
+    }
+    if (emptyFuzzy) {
+      emptyFuzzy.hidden = !(fuzzyOn && visible === 0 && groups.length > 0);
+    }
+  }
+
+  if (fuzzyToggle) {
+    fuzzyToggle.addEventListener("change", () => {
+      fuzzyOn = fuzzyToggle.checked;
+      applyView();
+    });
+  }
+
+  filters.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      filters.forEach((b) => b.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      fieldFilter = btn.getAttribute("data-filter") || "all";
+      applyView();
+    });
+  });
+
+  applyView();
+})();
+</script>
+{% endblock %}

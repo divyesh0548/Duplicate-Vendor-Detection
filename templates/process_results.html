@@ -9,9 +9,9 @@
   </div>
 
   <div class="workspace-intro">
-    <h1>Duplicate Detection Results</h1>
+    <h1>Overall Database Duplicates</h1>
     <p>
-      Rows sharing the same mobile, email, or GST are flagged only when vendor names differ.
+      Full-database scan: rows sharing the same mobile, email, GST, MSME, or PAN are flagged only when vendor names differ.
       Exact same names are never flagged. Turn on fuzzy match to also treat near-identical names as the same vendor.
     </p>
   </div>
@@ -63,11 +63,11 @@
         data-fuzzy="{{ results.fuzzy_summary.group_count }}">{{ results.summary.group_count }}</strong>
     </div>
     <div class="summary-stat">
-      <span class="summary-label">Phone · Email · GST</span>
+      <span class="summary-label">Phone · Email · GST · MSME · PAN</span>
       <strong id="stat-field-counts"
-        data-default="{{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }}"
-        data-fuzzy="{{ results.fuzzy_summary.phone }} · {{ results.fuzzy_summary.email }} · {{ results.fuzzy_summary.gst }}">
-        {{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }}
+        data-default="{{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }} · {{ results.summary.msme }} · {{ results.summary.pan }}"
+        data-fuzzy="{{ results.fuzzy_summary.phone }} · {{ results.fuzzy_summary.email }} · {{ results.fuzzy_summary.gst }} · {{ results.fuzzy_summary.msme }} · {{ results.fuzzy_summary.pan }}">
+        {{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }} · {{ results.summary.msme }} · {{ results.summary.pan }}
       </strong>
     </div>
   </div>
@@ -78,7 +78,7 @@
         <span class="clear-icon" aria-hidden="true">✓</span>
         <div>
           <h2>No duplicates found</h2>
-          <p>No shared mobile, email, or GST with different vendor names across {{ results.total_rows }} row(s).</p>
+          <p>No shared mobile, email, GST, MSME, or PAN with different vendor names across {{ results.total_rows }} row(s).</p>
         </div>
       </div>
     </div>
@@ -95,6 +95,12 @@
         </button>
         <button type="button" class="dup-filter" data-filter="gst">
           <span class="warn-icon warn-icon-sm" aria-hidden="true">⚠</span> GST
+        </button>
+        <button type="button" class="dup-filter" data-filter="msme">
+          <span class="warn-icon warn-icon-sm" aria-hidden="true">⚠</span> MSME
+        </button>
+        <button type="button" class="dup-filter" data-filter="pan">
+          <span class="warn-icon warn-icon-sm" aria-hidden="true">⚠</span> PAN
         </button>
       </div>
     </div>
@@ -129,6 +135,8 @@
                   <th>Phone</th>
                   <th>Email</th>
                   <th>GST</th>
+                  <th>MSME</th>
+                  <th>PAN</th>
                   <th>Source</th>
                 </tr>
               </thead>
@@ -147,6 +155,8 @@
                     <td class="{% if group.field == 'phone' %}cell-hit{% endif %}">{{ row.phone or '—' }}</td>
                     <td class="{% if group.field == 'email' %}cell-hit{% endif %}">{{ row.email or '—' }}</td>
                     <td class="{% if group.field == 'gst' %}cell-hit{% endif %}">{{ row.gst or '—' }}</td>
+                    <td class="{% if group.field == 'msme' %}cell-hit{% endif %}">{{ row.msme or '—' }}</td>
+                    <td class="{% if group.field == 'pan' %}cell-hit{% endif %}">{{ row.pan or '—' }}</td>
                     <td>
                       <span class="source-pill source-{{ 'ai' if row.source == 'AI-Extracted' else 'excel' }}">
                         {{ row.source or '—' }}

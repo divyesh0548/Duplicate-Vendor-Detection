@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block title %}Submission Duplicate Check{% endblock %}
+
+{% block content %}
+<section class="workspace workspace-wide">
+  <div class="page-nav">
+    <a href="{{ url_for('index') }}" class="back-link">← Back to console</a>
+    <a href="{{ url_for('vendor_docs') }}" class="back-link">Upload another pack</a>
+  </div>
+
+  <div class="workspace-intro">
+    <h1>Submission Duplicate Check</h1>
+    <p>
+      AI extracted this vendor pack and stored it in the database.
+      Match groups below show the AI-extracted row alongside existing database rows that share phone, email, GST, MSME, or PAN.
+    </p>
+  </div>
+
+  <div class="panel submitted-card">
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-label">Extracted vendor row</span>
+        <h2 class="panel-title">{{ submitted.name or '—' }}</h2>
+      </div>
+      <span class="source-pill source-ai">AI-Extracted · saved</span>
+    </div>
+    <div class="dup-table-wrap">
+      <table class="dup-table extracted-rows-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Vendor</th>
+            <th>Contact</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>GST</th>
+            <th>MSME</th>
+            <th>PAN</th>
+            <th>Aadhaar</th>
+            <th>Address</th>
+            <th>City</th>
+            <th>State</th>
+            <th>Pincode</th>
+            <th>Bank</th>
+            <th>Account</th>
+            <th>IFSC</th>
+            <th>RFP</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">{{ submitted.id or '—' }}</td>
+            <td><strong>{{ submitted.name or '—' }}</strong></td>
+            <td>{{ submitted.contact_person or '—' }}</td>
+            <td>{{ submitted.phone or '—' }}</td>
+            <td>{{ submitted.email or '—' }}</td>
+            <td>{{ submitted.gst or '—' }}</td>
+            <td>{{ submitted.msme or '—' }}</td>
+            <td>{{ submitted.pan or '—' }}</td>
+            <td>{{ submitted.aadhar or '—' }}</td>
+            <td>{{ submitted.address or '—' }}</td>
+            <td>{{ submitted.city or '—' }}</td>
+            <td>{{ submitted.state or '—' }}</td>
+            <td>{{ submitted.pincode or '—' }}</td>
+            <td>{{ submitted.bank_name or '—' }}</td>
+            <td>{{ submitted.account_no or '—' }}</td>
+            <td>{{ submitted.ifsc_code or '—' }}</td>
+            <td>{{ submitted.rfp_no or '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if extract_errors %}
+    <div class="flash flash-error">Extraction warnings: {{ extract_errors }}</div>
+  {% endif %}
+
+  <div class="result-summary panel">
+    <div class="summary-stat">
+      <span class="summary-label">DB rows compared</span>
+      <strong>{{ results.total_rows }}</strong>
+    </div>
+    <div class="summary-stat summary-stat-warn">
+      <span class="summary-label">
+        <span class="warn-icon warn-icon-sm" aria-hidden="true">⚠</span>
+        Matching rows
+      </span>
+      <strong>{{ results.summary.flagged_rows }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Match groups</span>
+      <strong>{{ results.summary.group_count }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Phone · Email · GST · MSME · PAN</span>
+      <strong>
+        {{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }} ·
+        {{ results.summary.msme }} · {{ results.summary.pan }}
+      </strong>
+    </div>
+  </div>
+
+  {% if not results.groups %}
+    <div class="panel panel-clear">
+      <div class="clear-state">
+        <span class="clear-icon" aria-hidden="true">✓</span>
+        <div>
+          <h2>No duplicates for this submission</h2>
+          <p>No existing rows share phone, email, GST, MSME, or PAN with this pack.</p>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="dup-filter-bar">
+      <span class="panel-label">Filter by field</span>
+      <div class="dup-filters" role="tablist">
+        <button type="button" class="dup-filter is-active" data-filter="all">All</button>
+        <button type="button" class="dup-filter" data-filter="phone">Phone</button>
+        <button type="button" class="dup-filter" data-filter="email">Email</button>
+        <button type="button" class="dup-filter" data-filter="gst">GST</button>
+        <button type="button" class="dup-filter" data-filter="msme">MSME</button>
+        <button type="button" class="dup-filter" data-filter="pan">PAN</button>
+      </div>
+    </div>
+
+    <div class="dup-groups">
+      {% for group in results.groups %}
+        <article class="dup-group panel" data-field="{{ group.field }}">
+          <header class="dup-group-header">
+            <div class="dup-group-title">
+              <span class="warn-badge">
+                <span class="warn-icon" aria-hidden="true">⚠</span>
+                Match
+              </span>
+              <div>
+                <span class="dup-field-tag">{{ group.field_label }}</span>
+                <h2 class="dup-matched">{{ group.matched_value }}</h2>
+              </div>
+            </div>
+            <span class="dup-count">{{ group.count }} row(s)</span>
+          </header>
+
+          <div class="dup-table-wrap">
+            <table class="dup-table">
+              <thead>
+                <tr>
+                  <th>Origin</th>
+                  <th>ID</th>
+                  <th>Vendor</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>GST</th>
+                  <th>MSME</th>
+                  <th>PAN</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in group.rows %}
+                  <tr class="dup-row">
+                    <td>
+                      <span class="source-pill source-{{ 'ai' if row._origin == 'submission' else 'excel' }}">
+                        {{ 'AI Extracted' if row._origin == 'submission' else 'Database' }}
+                      </span>
+                    </td>
+                    <td class="mono">{{ row.id or '—' }}</td>
+                    <td>
+                      <div class="vendor-cell">
+                        <strong>{{ row.name or '—' }}</strong>
+                      </div>
+                    </td>
+                    <td class="{% if group.field == 'phone' %}cell-hit{% endif %}">{{ row.phone or '—' }}</td>
+                    <td class="{% if group.field == 'email' %}cell-hit{% endif %}">{{ row.email or '—' }}</td>
+                    <td class="{% if group.field == 'gst' %}cell-hit{% endif %}">{{ row.gst or '—' }}</td>
+                    <td class="{% if group.field == 'msme' %}cell-hit{% endif %}">{{ row.msme or '—' }}</td>
+                    <td class="{% if group.field == 'pan' %}cell-hit{% endif %}">{{ row.pan or '—' }}</td>
+                    <td>
+                      <span class="source-pill source-{{ 'ai' if row.source == 'AI-Extracted' else 'excel' }}">
+                        {{ row.source or '—' }}
+                      </span>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="form-actions" style="padding: 8px 0 0;">
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to console</a>
+    <form action="{{ url_for('run_process') }}" method="post" style="display:inline;">
+      <button type="submit" class="btn btn-primary">Run overall duplicate scan</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const filters = document.querySelectorAll(".dup-filter");
+  const groups = document.querySelectorAll(".dup-group");
+  filters.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      filters.forEach((b) => b.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      const key = btn.getAttribute("data-filter");
+      groups.forEach((g) => {
+        g.hidden = !(key === "all" || g.getAttribute("data-field") === key);
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

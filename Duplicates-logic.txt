@@ -1,0 +1,6 @@
+Order on the results page: phone → email → GST → MSME
+
+A row can be flagged again for another field. Checks are independent. If Vendor A and Vendor B share the same phone and the same email (and have different names), you get:
+
+one Phone group, and
+one Email group

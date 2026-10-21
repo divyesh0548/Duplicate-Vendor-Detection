@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Quotation Document Results{% endblock %}
+
+{% block content %}
+<section class="workspace workspace-wide">
+  <div class="page-nav">
+    <a href="{{ url_for('index') }}" class="back-link">← Back to console</a>
+    <a href="{{ url_for('vendor_docs') }}" class="back-link">Upload another document</a>
+  </div>
+
+  <div class="workspace-intro">
+    <h1>Quotation Document Results</h1>
+    <p>
+      Extracted <strong>{{ inserted_rows|length }}</strong> vendor row(s) from
+      <code>{{ source_file }}</code> and stored as <code>AI-Extracted</code>.
+      Duplicates below are from <strong>this document only</strong>.
+    </p>
+  </div>
+
+  <div class="panel submitted-card">
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-label">Extracted vendors</span>
+        <h2 class="panel-title">{{ inserted_rows|length }} row(s) inserted</h2>
+      </div>
+    </div>
+    <div class="dup-table-wrap">
+      <table class="dup-table extracted-rows-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Vendor</th>
+            <th>Contact</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>GST</th>
+            <th>MSME</th>
+            <th>PAN</th>
+            <th>Aadhaar</th>
+            <th>Address</th>
+            <th>City</th>
+            <th>State</th>
+            <th>Pincode</th>
+            <th>Bank</th>
+            <th>Account</th>
+            <th>IFSC</th>
+            <th>RFP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in inserted_rows %}
+            <tr>
+              <td class="mono">{{ row.id }}</td>
+              <td><strong>{{ row.name or '—' }}</strong></td>
+              <td>{{ row.contact_person or '—' }}</td>
+              <td>{{ row.phone or '—' }}</td>
+              <td>{{ row.email or '—' }}</td>
+              <td>{{ row.gst or '—' }}</td>
+              <td>{{ row.msme or '—' }}</td>
+              <td>{{ row.pan or '—' }}</td>
+              <td>{{ row.aadhar or '—' }}</td>
+              <td>{{ row.address or '—' }}</td>
+              <td>{{ row.city or '—' }}</td>
+              <td>{{ row.state or '—' }}</td>
+              <td>{{ row.pincode or '—' }}</td>
+              <td>{{ row.bank_name or '—' }}</td>
+              <td>{{ row.account_no or '—' }}</td>
+              <td>{{ row.ifsc_code or '—' }}</td>
+              <td>{{ row.rfp_no or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="result-summary panel">
+    <div class="summary-stat">
+      <span class="summary-label">Vendors in document</span>
+      <strong>{{ results.total_rows }}</strong>
+    </div>
+    <div class="summary-stat summary-stat-warn">
+      <span class="summary-label">
+        <span class="warn-icon warn-icon-sm" aria-hidden="true">⚠</span>
+        Flagged in document
+      </span>
+      <strong>{{ results.summary.flagged_rows }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Duplicate groups</span>
+      <strong>{{ results.summary.group_count }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Phone · Email · GST · MSME · PAN</span>
+      <strong>
+        {{ results.summary.phone }} · {{ results.summary.email }} · {{ results.summary.gst }} ·
+        {{ results.summary.msme }} · {{ results.summary.pan }}
+      </strong>
+    </div>
+  </div>
+
+  {% if not results.groups %}
+    <div class="panel panel-clear">
+      <div class="clear-state">
+        <span class="clear-icon" aria-hidden="true">✓</span>
+        <div>
+          <h2>No within-document duplicates</h2>
+          <p>No shared phone, email, GST, MSME, or PAN across differently named vendors in this file.</p>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="dup-groups">
+      {% for group in results.groups %}
+        <article class="dup-group panel">
+          <header class="dup-group-header">
+            <div class="dup-group-title">
+              <span class="warn-badge">
+                <span class="warn-icon" aria-hidden="true">⚠</span>
+                Duplicate
+              </span>
+              <div>
+                <span class="dup-field-tag">{{ group.field_label }}</span>
+                <h2 class="dup-matched">{{ group.matched_value }}</h2>
+              </div>
+            </div>
+            <span class="dup-count">{{ group.count }} rows</span>
+          </header>
+          <div class="dup-table-wrap">
+            <table class="dup-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Vendor</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>GST</th>
+                  <th>MSME</th>
+                  <th>PAN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in group.rows %}
+                  <tr class="dup-row">
+                    <td class="mono">{{ row.id }}</td>
+                    <td><strong>{{ row.name or '—' }}</strong></td>
+                    <td class="{% if group.field == 'phone' %}cell-hit{% endif %}">{{ row.phone or '—' }}</td>
+                    <td class="{% if group.field == 'email' %}cell-hit{% endif %}">{{ row.email or '—' }}</td>
+                    <td class="{% if group.field == 'gst' %}cell-hit{% endif %}">{{ row.gst or '—' }}</td>
+                    <td class="{% if group.field == 'msme' %}cell-hit{% endif %}">{{ row.msme or '—' }}</td>
+                    <td class="{% if group.field == 'pan' %}cell-hit{% endif %}">{{ row.pan or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="form-actions" style="padding: 12px 0 0; justify-content: flex-start;">
+    <a href="{{ url_for('index') }}" class="btn btn-ghost">Back to console</a>
+    <form action="{{ url_for('compare_quotation_with_db') }}" method="post">
+      <input type="hidden" name="inserted_ids" value="{{ inserted_ids_csv }}" />
+      <button type="submit" class="btn btn-primary">Compare with database</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

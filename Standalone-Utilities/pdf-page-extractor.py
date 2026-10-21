@@ -4,7 +4,7 @@ Standalone PDF utilities.
 Current:
   - extract_pages: build a new PDF from a page range
 
-Edit INPUT_PDF / PAGE_RANGE / OUTPUT_PDF below, then run:
+Edit INPUT_PDF / PAGE_RANGE / OUTPUT_DIR below, then run:
   python pdf-page-extractor.py
 
 Page numbers are 1-based (first page = 1).
@@ -30,9 +30,9 @@ PathLike = Union[str, Path]
 # CONFIG — set these before running the script
 # ---------------------------------------------------------------------------
 
-INPUT_PDF = r"C:\Divyesh\Vendor Data Detection\data\Additonal QCS\PO 059 Mar25 105 Toll Rate Rivision Risha Infrastructure.pdf"   # full path to the source PDF
-PAGE_RANGE = "15-16"                    # e.g. "1-5", "1,3,8", "2-", "-4"
-OUTPUT_PDF = None                     # None = auto name beside input, or set a path
+INPUT_PDF = r"C:\Divyesh\Vendor Data Detection\data\Additonal QCS\WO-126-Galia-Assam-Porta Cabin Foundation.pdf"   # full path to the source PDF
+PAGE_RANGE = "32-35"                    # e.g. "1-5", "1,3,8", "2-", "-4"
+OUTPUT_DIR = r"C:\Divyesh\Vendor Data Detection\Standalone-Utilities\generated-pdfs"  # all generated PDFs go here
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def parse_page_range(spec: str, total_pages: int) -> List[int]:
     return indexes
 
 
-def _default_output_path(src: Path, indexes: Sequence[int]) -> Path:
+def _output_filename(src: Path, indexes: Sequence[int]) -> str:
     first = indexes[0] + 1
     last = indexes[-1] + 1
     if len(indexes) == 1:
@@ -122,7 +122,21 @@ def _default_output_path(src: Path, indexes: Sequence[int]) -> Path:
         suffix = f"_p{first}-{last}"
     else:
         suffix = f"_p{first}-plus"
-    return src.with_name(f"{src.stem}{suffix}{src.suffix}")
+    return f"{src.stem}{suffix}{src.suffix}"
+
+
+def resolve_output_path(
+    src: Path,
+    indexes: Sequence[int],
+    output_dir: PathLike | None = None,
+) -> Path:
+    """Build the output PDF path inside ``output_dir`` (created if needed)."""
+    filename = _output_filename(src, indexes)
+    if output_dir:
+        folder = _as_path(output_dir)
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / filename
+    return src.with_name(filename)
 
 
 def write_pdf(writer: PdfWriter, output_path: PathLike) -> Path:
@@ -140,11 +154,12 @@ def write_pdf(writer: PdfWriter, output_path: PathLike) -> Path:
 def extract_pages(
     pdf_path: PathLike,
     page_range: str,
-    output_path: PathLike | None = None,
+    output_dir: PathLike | None = None,
 ) -> Path:
     """
     Create a new PDF containing only the pages in ``page_range``.
 
+    Writes into ``output_dir`` when provided; otherwise beside the source PDF.
     Returns the path of the generated PDF.
     """
     src = _as_path(pdf_path)
@@ -155,7 +170,7 @@ def extract_pages(
     for idx in indexes:
         writer.add_page(reader.pages[idx])
 
-    out = _as_path(output_path) if output_path else _default_output_path(src, indexes)
+    out = resolve_output_path(src, indexes, output_dir)
     return write_pdf(writer, out)
 
 
@@ -174,7 +189,7 @@ def extract_pages(
 
 def main() -> int:
     try:
-        out = extract_pages(INPUT_PDF, PAGE_RANGE, OUTPUT_PDF)
+        out = extract_pages(INPUT_PDF, PAGE_RANGE, OUTPUT_DIR)
         print(f"Wrote: {out}")
         return 0
     except (FileNotFoundError, ValueError, OSError) as exc:

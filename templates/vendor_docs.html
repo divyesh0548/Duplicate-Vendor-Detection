@@ -10,7 +10,12 @@
 
   <div class="workspace-intro">
     <h1>Vendor Document Pack</h1>
-    <p>Vendor name and at least one document are required. Attach MSME, PAN, Aadhaar, and/or other docs — AI extracts fields and stores them with source <code>AI-Extracted</code>.</p>
+    <p id="mode-intro-standard">
+      Vendor name and at least one document are required. Attach MSME, PAN, Aadhaar, and/or other docs — AI extracts fields and stores them with source <code>AI-Extracted</code>.
+    </p>
+    <p id="mode-intro-document" hidden>
+      Upload a single PDF or image that may contain one or more quotations. AI extracts each vendor into its own row (<code>AI-Extracted</code>), then flags duplicates <strong>within that document only</strong>.
+    </p>
   </div>
 
   <form
@@ -18,6 +23,7 @@
     method="post"
     enctype="multipart/form-data"
     class="panel panel-primary vendor-form"
+    id="vendor-docs-form"
   >
     <div class="panel-header">
       <div class="panel-title-group">
@@ -26,66 +32,152 @@
       </div>
     </div>
 
-    <div class="form-grid">
-      <div class="field">
-        <label for="vendor_name">Vendor name</label>
-        <input
-          type="text"
-          id="vendor_name"
-          name="vendor_name"
-          value="{{ form_data.get('vendor_name', '') }}"
-          placeholder="e.g. Acme Supplies Pvt Ltd"
-          required
-        />
+    <div class="mode-switch-bar">
+      <span class="panel-label">Upload mode</span>
+      <div class="mode-switch" role="tablist" aria-label="Upload mode">
+        <label class="mode-option">
+          <input type="radio" name="upload_mode" value="standard" checked />
+          <span>Standard pack</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="upload_mode" value="document_only" />
+          <span>Document only (quotations)</span>
+        </label>
+      </div>
+    </div>
+
+    <div id="mode-standard">
+      <div class="form-grid">
+        <div class="field">
+          <label for="vendor_name">Vendor name</label>
+          <input
+            type="text"
+            id="vendor_name"
+            name="vendor_name"
+            value="{{ form_data.get('vendor_name', '') }}"
+            placeholder="e.g. Acme Supplies Pvt Ltd"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label for="rfp_no">RFP No.</label>
+          <input
+            type="text"
+            id="rfp_no"
+            name="rfp_no"
+            value="{{ form_data.get('rfp_no', '') }}"
+            placeholder="e.g. RFP-2026-0142 (optional)"
+            autocomplete="off"
+          />
+        </div>
       </div>
 
-      <div class="field">
-        <label for="rfp_no">RFP No.</label>
+      <div class="doc-grid">
+        <label class="doc-card" for="msme">
+          <span class="doc-card-label">Upload MSME</span>
+          <span class="doc-card-hint">Certificate / registration</span>
+          <input type="file" id="msme" name="msme" data-preview="msme-preview" />
+          <span class="file-name" id="msme-preview">No file selected</span>
+        </label>
+
+        <label class="doc-card" for="pan">
+          <span class="doc-card-label">Upload PAN</span>
+          <span class="doc-card-hint">PAN card scan / PDF</span>
+          <input type="file" id="pan" name="pan" data-preview="pan-preview" />
+          <span class="file-name" id="pan-preview">No file selected</span>
+        </label>
+
+        <label class="doc-card" for="aadhar">
+          <span class="doc-card-label">Upload Aadhaar</span>
+          <span class="doc-card-hint">Aadhaar card scan / PDF</span>
+          <input type="file" id="aadhar" name="aadhar" data-preview="aadhar-preview" />
+          <span class="file-name" id="aadhar-preview">No file selected</span>
+        </label>
+
+        <label class="doc-card doc-card-wide" for="other_docs">
+          <span class="doc-card-label">Other docs</span>
+          <span class="doc-card-hint">Multiple attachments allowed · optional</span>
+          <input type="file" id="other_docs" name="other_docs" multiple data-preview="other-preview" />
+          <span class="file-name" id="other-preview">No files selected</span>
+        </label>
+      </div>
+    </div>
+
+    <div id="mode-document" hidden>
+      <div class="doc-grid">
+        <label class="doc-card doc-card-wide" for="quotation_doc">
+          <span class="doc-card-label">Upload quotation document</span>
+          <span class="doc-card-hint">Single PDF or image · may contain multiple vendor quotations</span>
+          <input
+            type="file"
+            id="quotation_doc"
+            name="quotation_doc"
+            accept=".pdf,image/*,.png,.jpg,.jpeg,.gif,.webp"
+            data-preview="quotation-preview"
+          />
+          <span class="file-name" id="quotation-preview">No file selected</span>
+        </label>
+      </div>
+      <div class="field" style="padding: 0 22px 8px;">
+        <label for="doc_rfp_no">RFP No. (optional)</label>
         <input
           type="text"
-          id="rfp_no"
-          name="rfp_no"
-          value="{{ form_data.get('rfp_no', '') }}"
-          placeholder="e.g. RFP-2026-0142 (optional)"
+          id="doc_rfp_no"
+          name="doc_rfp_no"
+          placeholder="Applied to all extracted vendors if set"
           autocomplete="off"
         />
       </div>
     </div>
 
-    <div class="doc-grid">
-      <label class="doc-card" for="msme">
-        <span class="doc-card-label">Upload MSME</span>
-        <span class="doc-card-hint">Certificate / registration</span>
-        <input type="file" id="msme" name="msme" data-preview="msme-preview" />
-        <span class="file-name" id="msme-preview">No file selected</span>
-      </label>
-
-      <label class="doc-card" for="pan">
-        <span class="doc-card-label">Upload PAN</span>
-        <span class="doc-card-hint">PAN card scan / PDF</span>
-        <input type="file" id="pan" name="pan" data-preview="pan-preview" />
-        <span class="file-name" id="pan-preview">No file selected</span>
-      </label>
-
-      <label class="doc-card" for="aadhar">
-        <span class="doc-card-label">Upload Aadhaar</span>
-        <span class="doc-card-hint">Aadhaar card scan / PDF</span>
-        <input type="file" id="aadhar" name="aadhar" data-preview="aadhar-preview" />
-        <span class="file-name" id="aadhar-preview">No file selected</span>
-      </label>
-
-      <label class="doc-card doc-card-wide" for="other_docs">
-        <span class="doc-card-label">Other docs</span>
-        <span class="doc-card-hint">Multiple attachments allowed · optional</span>
-        <input type="file" id="other_docs" name="other_docs" multiple data-preview="other-preview" />
-        <span class="file-name" id="other-preview">No files selected</span>
-      </label>
-    </div>
-
     <div class="form-actions">
       <a href="{{ url_for('index') }}" class="btn btn-ghost">Cancel</a>
-      <button type="submit" class="btn btn-primary">Submit Vendor Pack</button>
+      <button type="submit" class="btn btn-primary" id="submit-btn">Submit Vendor Pack</button>
     </div>
   </form>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const standardBlock = document.getElementById("mode-standard");
+  const documentBlock = document.getElementById("mode-document");
+  const introStandard = document.getElementById("mode-intro-standard");
+  const introDocument = document.getElementById("mode-intro-document");
+  const vendorName = document.getElementById("vendor_name");
+  const quotationDoc = document.getElementById("quotation_doc");
+  const submitBtn = document.getElementById("submit-btn");
+  const radios = document.querySelectorAll('input[name="upload_mode"]');
+
+  function applyMode() {
+    const mode = document.querySelector('input[name="upload_mode"]:checked')?.value || "standard";
+    const isDoc = mode === "document_only";
+    if (standardBlock) standardBlock.hidden = isDoc;
+    if (documentBlock) documentBlock.hidden = !isDoc;
+    if (introStandard) introStandard.hidden = isDoc;
+    if (introDocument) introDocument.hidden = !isDoc;
+    if (vendorName) {
+      vendorName.required = !isDoc;
+      vendorName.disabled = isDoc;
+    }
+    if (quotationDoc) {
+      quotationDoc.required = isDoc;
+      quotationDoc.disabled = !isDoc;
+    }
+    // Disable unused file inputs so they are not submitted
+    ["msme", "pan", "aadhar", "other_docs"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = isDoc;
+    });
+    if (submitBtn) {
+      submitBtn.textContent = isDoc ? "Extract Vendors from Document" : "Submit Vendor Pack";
+    }
+  }
+
+  radios.forEach((r) => r.addEventListener("change", applyMode));
+  applyMode();
+})();
+</script>
 {% endblock %}

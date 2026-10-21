@@ -1,4 +1,4 @@
-"""Find duplicate vendor_data rows by phone, email, and GST.
+"""Find duplicate vendor_data rows by phone, email, GST, and MSME.
 
 Exact-same vendor names are not flagged.
 Fuzzy name matching can collapse near-identical vendor names and remove those groups.
@@ -9,15 +9,17 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 
-COMPARE_FIELDS = ("phone", "email", "gst")
+COMPARE_FIELDS = ("phone", "email", "gst", "msme", "pan")
 
 FIELD_LABELS = {
     "phone": "Mobile / Phone",
     "email": "Email",
     "gst": "GST",
+    "msme": "MSME",
+    "pan": "PAN",
 }
 
 # Tunable — covers CSPDCL / Chhattisgarh / AV TECH style near-matches
@@ -54,10 +56,30 @@ def normalize_gst(value: Optional[str]) -> Optional[str]:
     return text
 
 
+def normalize_msme(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = re.sub(r"\s+", "", str(value)).upper()
+    if not text or text in {"NULL", "NONE", "NILL", "NIL", "N/A", "-"}:
+        return None
+    return text
+
+
+def normalize_pan(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = re.sub(r"\s+", "", str(value)).upper()
+    if not text or text in {"NULL", "NONE", "NILL", "NIL", "N/A", "-"}:
+        return None
+    return text
+
+
 NORMALIZERS = {
     "phone": normalize_phone,
     "email": normalize_email,
     "gst": normalize_gst,
+    "msme": normalize_msme,
+    "pan": normalize_pan,
 }
 
 
@@ -188,9 +210,11 @@ def _summarize_groups(groups: List[Dict[str, Any]]) -> Dict[str, int]:
             if row.get("id") is not None:
                 flagged_ids.add(row["id"])
     return {
-        "phone": counts["phone"],
-        "email": counts["email"],
-        "gst": counts["gst"],
+        "phone": counts.get("phone", 0),
+        "email": counts.get("email", 0),
+        "gst": counts.get("gst", 0),
+        "msme": counts.get("msme", 0),
+        "pan": counts.get("pan", 0),
         "group_count": len(groups),
         "flagged_rows": len(flagged_ids),
     }
@@ -198,7 +222,7 @@ def _summarize_groups(groups: List[Dict[str, Any]]) -> Dict[str, int]:
 
 def find_duplicates(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Flag rows that share phone / email / GST but do NOT share the same vendor name.
+    Flag rows that share phone / email / GST / MSME but do NOT share the same vendor name.
 
     Each group includes ``fuzzy_name_match`` — True when all names in the group
     are fuzzy-similar (UI can hide these when fuzzy matching is enabled).
@@ -265,4 +289,158 @@ def find_duplicates(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "groups": max(0, removed_groups),
             "rows": max(0, removed_rows),
         },
+    }
+
+
+def find_document_vs_db_duplicates(
+    doc_rows: List[Dict[str, Any]],
+    db_rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Compare vendors extracted from one document against other DB rows.
+
+    Flags when phone / email / GST / MSME / PAN match between a doc row and a
+    DB row, but only when vendor names differ (case-insensitive by default).
+    Groups where all names are fuzzy-similar are marked for the UI toggle.
+    """
+    doc_ids = {r.get("id") for r in doc_rows if r.get("id") is not None}
+    external = [r for r in db_rows if r.get("id") not in doc_ids]
+
+    groups: List[Dict[str, Any]] = []
+
+    for field in COMPARE_FIELDS:
+        doc_buckets: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in doc_rows:
+            key = NORMALIZERS[field](row.get(field))
+            if key:
+                doc_buckets[key].append(row)
+
+        for matched_value, from_doc in doc_buckets.items():
+            from_db = [
+                r
+                for r in external
+                if NORMALIZERS[field](r.get(field)) == matched_value
+            ]
+            if not from_db:
+                continue
+
+            tagged_doc = [{**r, "_origin": "document"} for r in from_doc]
+            tagged_db = [{**r, "_origin": "database"} for r in from_db]
+            ordered = sorted(
+                tagged_doc + tagged_db,
+                key=lambda r: (0 if r.get("_origin") == "document" else 1, r.get("id") or 0),
+            )
+
+            # Case-insensitive name equality — same vendor name => not a flag
+            exact_names = {
+                normalize_vendor_name(r.get("name"))
+                for r in ordered
+                if normalize_vendor_name(r.get("name"))
+            }
+            if len(exact_names) <= 1:
+                continue
+
+            name_list = [r.get("name") for r in ordered]
+            fuzzy_same = _all_names_fuzzy_same(name_list)
+
+            groups.append(
+                {
+                    "field": field,
+                    "field_label": FIELD_LABELS[field],
+                    "matched_value": matched_value,
+                    "count": len(ordered),
+                    "rows": ordered,
+                    "distinct_names": _distinct_exact_names(ordered),
+                    "fuzzy_name_match": fuzzy_same,
+                }
+            )
+
+    default_summary = _summarize_groups(groups)
+    fuzzy_filtered = [g for g in groups if not g["fuzzy_name_match"]]
+    fuzzy_summary = _summarize_groups(fuzzy_filtered)
+    removed_groups = default_summary["group_count"] - fuzzy_summary["group_count"]
+    removed_rows = default_summary["flagged_rows"] - fuzzy_summary["flagged_rows"]
+
+    return {
+        "mode": "document_vs_db",
+        "total_rows": len(external),
+        "doc_row_count": len(doc_rows),
+        "groups": groups,
+        "summary": default_summary,
+        "fuzzy_summary": fuzzy_summary,
+        "fuzzy_removed": {
+            "groups": max(0, removed_groups),
+            "rows": max(0, removed_rows),
+        },
+    }
+
+
+def find_submission_duplicates(
+    submitted: Dict[str, Any],
+    existing_rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Compare one vendor-document submission against existing DB rows.
+
+    Each match group includes the AI-extracted submission row plus existing
+    DB rows that share phone / email / GST / MSME / PAN.
+    """
+    groups: List[Dict[str, Any]] = []
+    flagged_ids = set()
+    summary_counts = {field: 0 for field in COMPARE_FIELDS}
+
+    submitted_row = {
+        **submitted,
+        "_origin": "submission",
+        "source": submitted.get("source") or "AI-Extracted",
+    }
+
+    for field in COMPARE_FIELDS:
+        submitted_key = NORMALIZERS[field](submitted.get(field))
+        if not submitted_key:
+            continue
+
+        matches = []
+        for row in existing_rows:
+            row_key = NORMALIZERS[field](row.get(field))
+            if row_key and row_key == submitted_key:
+                matches.append({**row, "_origin": "database"})
+
+        if not matches:
+            continue
+
+        ordered = [submitted_row] + sorted(matches, key=lambda r: r.get("id") or 0)
+        groups.append(
+            {
+                "field": field,
+                "field_label": FIELD_LABELS[field],
+                "matched_value": submitted_key,
+                "count": len(ordered),
+                "rows": ordered,
+                "fuzzy_name_match": False,
+            }
+        )
+        summary_counts[field] += 1
+        if submitted.get("id") is not None:
+            flagged_ids.add(submitted["id"])
+        for r in matches:
+            if r.get("id") is not None:
+                flagged_ids.add(r["id"])
+
+    return {
+        "mode": "submission",
+        "submitted": submitted,
+        "total_rows": len(existing_rows),
+        "groups": groups,
+        "summary": {
+            **summary_counts,
+            "group_count": len(groups),
+            "flagged_rows": len(flagged_ids),
+        },
+        "fuzzy_summary": {
+            **summary_counts,
+            "group_count": len(groups),
+            "flagged_rows": len(flagged_ids),
+        },
+        "fuzzy_removed": {"groups": 0, "rows": 0},
     }

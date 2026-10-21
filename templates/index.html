@@ -86,7 +86,7 @@
       <div class="action-copy">
         <span class="panel-label">Step 02</span>
         <h2 class="panel-title">Run Process</h2>
-        <p>Scan all vendor rows for duplicate mobile, email, or GST values and flag matches.</p>
+        <p>Scan the full database for duplicate mobile, email, GST, MSME, or PAN values (different vendor names).</p>
       </div>
       <form action="{{ url_for('run_process') }}" method="post">
         <button type="submit" class="btn btn-primary btn-run">

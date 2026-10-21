@@ -102,6 +102,44 @@ Return ONLY valid JSON with these keys (use null if not found):
 Prefer company/vendor legal name in "name". Prefer mobile in "phone".""",
 }
 
+QUOTATION_MULTI_VENDOR_PROMPT = """You are reading a document that may contain one or more vendor quotations
+(look for words/phrases like "quotation", "quote", "price bid", "offer", "techno-commercial offer",
+" Quotation from", letterhead sections, or similar cues that start a new quotation).
+
+Extract EVERY distinct vendor/company that appears with a quotation or as a quoting party.
+Return ONLY valid JSON in this exact shape:
+{
+  "vendors": [
+    {
+      "name": string|null,
+      "contact_person": string|null,
+      "address": string|null,
+      "city": string|null,
+      "state": string|null,
+      "pincode": string|null,
+      "phone": string|null,
+      "email": string|null,
+      "pan": string|null,
+      "gst": string|null,
+      "msme": string|null,
+      "rfp_no": string|null,
+      "bank_name": string|null,
+      "beneficiary_name": string|null,
+      "account_no": string|null,
+      "ifsc_code": string|null,
+      "aadhar": string|null
+    }
+  ]
+}
+
+Rules:
+- One object per distinct vendor name (do not merge different companies).
+- If the same vendor appears twice, keep one object and fill the richest details.
+- Skip parties that are clearly the buyer / client only, unless they are also quoting.
+- Use null when a field is not visible.
+- "name" is required whenever you can identify the vendor; omit vendors with no usable name.
+"""
+
 
 def _model() -> str:
     return os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
@@ -180,6 +218,70 @@ def _parse_json_response(text: str) -> Dict[str, Any]:
     return data
 
 
+def _parse_vendors_payload(text: str) -> List[Dict[str, Any]]:
+    """Parse multi-vendor JSON: {vendors:[...]} or a bare array."""
+    cleaned = _strip_json_fence(text)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        obj_match = re.search(r"\{[\s\S]*\}", cleaned)
+        arr_match = re.search(r"\[[\s\S]*\]", cleaned)
+        if obj_match:
+            data = json.loads(obj_match.group(0))
+        elif arr_match:
+            data = json.loads(arr_match.group(0))
+        else:
+            raise ValueError(f"Model did not return JSON: {text[:300]}")
+
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        vendors = data.get("vendors")
+        if isinstance(vendors, list):
+            return [item for item in vendors if isinstance(item, dict)]
+        # Single vendor object fallback
+        if any(k in data for k in AI_FIELD_KEYS):
+            return [data]
+    raise ValueError("Model JSON did not contain a vendors list.")
+
+
+def _call_openrouter(parts: List[Dict[str, Any]], timeout: int = 180) -> str:
+    headers = {
+        "Authorization": f"Bearer {_api_key()}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://localhost/vendor-data-detection",
+        "X-Title": "Vendor Data Detection",
+    }
+    payload = {
+        "model": _model(),
+        "temperature": 0,
+        "messages": [{"role": "user", "content": parts}],
+    }
+    response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"OpenRouter error {response.status_code}: {response.text[:500]}"
+        )
+    body = response.json()
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected OpenRouter response: {body}") from exc
+
+    if isinstance(content, list):
+        text_bits = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                text_bits.append(part.get("text") or "")
+            elif isinstance(part, str):
+                text_bits.append(part)
+        content = "\n".join(text_bits)
+
+    if not isinstance(content, str):
+        raise RuntimeError(f"Unexpected message content type: {type(content)}")
+    return content
+
+
 def _normalize_extracted(data: Dict[str, Any]) -> Dict[str, Optional[str]]:
     out: Dict[str, Optional[str]] = {k: None for k in AI_FIELD_KEYS}
     for key in AI_FIELD_KEYS:
@@ -209,50 +311,46 @@ def extract_from_document(path: Path, doc_type: str) -> Dict[str, Optional[str]]
         {"type": "text", "text": prompt},
         *_file_to_content_parts(path),
     ]
-
-    headers = {
-        "Authorization": f"Bearer {_api_key()}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://localhost/vendor-data-detection",
-        "X-Title": "Vendor Data Detection",
-    }
-    payload = {
-        "model": _model(),
-        "temperature": 0,
-        "messages": [
-            {
-                "role": "user",
-                "content": parts,
-            }
-        ],
-    }
-
-    response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=120)
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"OpenRouter error {response.status_code}: {response.text[:500]}"
-        )
-
-    body = response.json()
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"Unexpected OpenRouter response: {body}") from exc
-
-    if isinstance(content, list):
-        # Some providers return content parts
-        text_bits = []
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                text_bits.append(part.get("text") or "")
-            elif isinstance(part, str):
-                text_bits.append(part)
-        content = "\n".join(text_bits)
-
-    if not isinstance(content, str):
-        raise RuntimeError(f"Unexpected message content type: {type(content)}")
-
+    content = _call_openrouter(parts, timeout=120)
     return _normalize_extracted(_parse_json_response(content))
+
+
+def extract_vendors_from_quotation_document(
+    path: Path,
+) -> List[Dict[str, Optional[str]]]:
+    """
+    Extract one row per vendor from a multi-quotation PDF/image.
+
+    Uses quotation cues (\"quotation\", offer headers, etc.) to separate vendors.
+    """
+    parts: List[Dict[str, Any]] = [
+        {"type": "text", "text": QUOTATION_MULTI_VENDOR_PROMPT},
+        *_file_to_content_parts(path),
+    ]
+    content = _call_openrouter(parts, timeout=180)
+    raw_vendors = _parse_vendors_payload(content)
+
+    records: List[Dict[str, Optional[str]]] = []
+    seen_names = set()
+    for item in raw_vendors:
+        record = _normalize_extracted(item)
+        name = (record.get("name") or "").strip()
+        if not name:
+            continue
+        name_key = name.lower()
+        if name_key in seen_names:
+            # Merge richer details into the first occurrence
+            for idx, existing in enumerate(records):
+                if (existing.get("name") or "").strip().lower() == name_key:
+                    records[idx] = _merge_fields(existing, record)
+                    break
+            continue
+        seen_names.add(name_key)
+        records.append(record)
+
+    if not records:
+        raise ValueError("No vendor names could be extracted from the document.")
+    return records
 
 
 def _merge_fields(
