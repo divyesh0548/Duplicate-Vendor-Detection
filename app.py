@@ -1,9 +1,10 @@
+import json
 import logging
 import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from flask import (
@@ -16,7 +17,11 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from ai_extract import extract_vendor_pack, extract_vendors_from_quotation_document
+from ai_extract import (
+    extract_entities_from_document,
+    extract_vendor_pack,
+    extract_vendors_from_quotation_document,
+)
 from db import (
     SOURCE_AI,
     SOURCE_EXCEL,
@@ -29,8 +34,10 @@ from db import (
 )
 from db_dedupe import remove_exact_combo_duplicates
 from duplicate_check import (
+    find_cross_document_links,
     find_document_vs_db_duplicates,
     find_duplicates,
+    find_entities_vs_database,
     find_submission_duplicates,
 )
 from master_parser import parse_master_file
@@ -343,6 +350,172 @@ def compare_quotation_with_db():
         return redirect(url_for("index"))
 
     return render_template("quotation_db_compare.html", results=results)
+
+
+def _link_batch_path(batch_id: str) -> Path:
+    safe = secure_filename(batch_id)
+    return UPLOAD_VENDOR / safe / "batch.json"
+
+
+def _load_link_batch(batch_id: str) -> Dict[str, Any]:
+    path = _link_batch_path(batch_id)
+    if not path.is_file():
+        raise FileNotFoundError("This document-link batch was not found.")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_link_batch(batch_id: str, payload: Dict[str, Any]) -> None:
+    path = _link_batch_path(batch_id)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@app.route("/document-links", methods=["GET", "POST"])
+def document_links():
+    """Separate flow: multi-doc extract, links inside the submission only, no auto insert."""
+    if request.method == "GET":
+        return render_template("document_links.html")
+
+    files = [f for f in request.files.getlist("link_docs") if f and f.filename]
+    if len(files) < 2:
+        flash("Upload at least two documents to look for links between them.", "error")
+        return render_template("document_links.html")
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    batch_id = f"link_{stamp}"
+    batch_dir = UPLOAD_VENDOR / batch_id
+    batch_dir.mkdir(parents=True, exist_ok=True)
+
+    entities: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    saved_names: List[str] = []
+
+    for upload in files:
+        ext = upload.filename.rsplit(".", 1)[-1].lower() if "." in upload.filename else ""
+        if ext not in QUOTATION_EXTENSIONS:
+            errors.append(f"{upload.filename}: only PDF and images are accepted")
+            continue
+        saved = save_file(upload, batch_dir, prefix="doc_")
+        if not saved:
+            errors.append(f"{upload.filename}: could not save file")
+            continue
+        saved_names.append(saved)
+        try:
+            found = extract_entities_from_document(batch_dir / saved)
+            for item in found:
+                item["source_file"] = upload.filename
+                item["saved_as"] = saved
+                item["inserted_id"] = None
+                entities.append(item)
+        except Exception as exc:
+            errors.append(f"{upload.filename}: {exc}")
+
+    if len(saved_names) < 2:
+        flash(
+            "Need at least two readable documents. " + ("; ".join(errors[:3]) if errors else ""),
+            "error",
+        )
+        return render_template("document_links.html")
+
+    payload = {
+        "batch_id": batch_id,
+        "created_at": datetime.now().isoformat(),
+        "files": saved_names,
+        "entities": entities,
+        "errors": errors,
+    }
+    _save_link_batch(batch_id, payload)
+    return redirect(url_for("document_link_results", batch_id=batch_id))
+
+
+@app.route("/document-links/<batch_id>")
+def document_link_results(batch_id: str):
+    try:
+        payload = _load_link_batch(batch_id)
+    except FileNotFoundError:
+        flash("Document link results were not found.", "error")
+        return redirect(url_for("document_links"))
+
+    entities = payload.get("entities") or []
+    links = find_cross_document_links(entities)
+    return render_template(
+        "document_link_results.html",
+        batch_id=batch_id,
+        entities=entities,
+        links=links,
+        errors=payload.get("errors") or [],
+    )
+
+
+@app.route("/document-links/<batch_id>/add", methods=["POST"])
+def document_links_add(batch_id: str):
+    try:
+        payload = _load_link_batch(batch_id)
+    except FileNotFoundError:
+        flash("Document link batch was not found.", "error")
+        return redirect(url_for("document_links"))
+
+    try:
+        index = int(request.form.get("index", "-1"))
+    except ValueError:
+        index = -1
+
+    entities = payload.get("entities") or []
+    if index < 0 or index >= len(entities):
+        flash("That extracted row could not be found.", "error")
+        return redirect(url_for("document_link_results", batch_id=batch_id))
+
+    entity = entities[index]
+    if entity.get("inserted_id"):
+        flash(f"Already saved as row {entity['inserted_id']}.", "success")
+        return redirect(url_for("document_link_results", batch_id=batch_id))
+
+    record = {key: entity.get(key) for key in (
+        "name", "contact_person", "address", "city", "state", "pincode",
+        "phone", "email", "pan", "gst", "msme", "aadhar", "rfp_no",
+        "bank_name", "beneficiary_name", "account_no", "ifsc_code",
+    )}
+    if not record.get("name"):
+        flash("This row has no name, so it was not added.", "error")
+        return redirect(url_for("document_link_results", batch_id=batch_id))
+
+    try:
+        inserted_ids = insert_vendor_rows_returning_ids(
+            [record],
+            source_file=batch_id,
+            source=SOURCE_AI,
+        )
+    except Exception as exc:
+        flash(f"Could not add row: {exc}", "error")
+        return redirect(url_for("document_link_results", batch_id=batch_id))
+
+    entity["inserted_id"] = inserted_ids[0] if inserted_ids else None
+    entities[index] = entity
+    payload["entities"] = entities
+    _save_link_batch(batch_id, payload)
+    flash(f"Added {record['name']} as row {entity['inserted_id']}.", "success")
+    return redirect(url_for("document_link_results", batch_id=batch_id))
+
+
+@app.route("/document-links/<batch_id>/compare-db", methods=["POST"])
+def document_links_compare_db(batch_id: str):
+    try:
+        payload = _load_link_batch(batch_id)
+    except FileNotFoundError:
+        flash("Document link batch was not found.", "error")
+        return redirect(url_for("document_links"))
+
+    entities = payload.get("entities") or []
+    try:
+        results = find_entities_vs_database(entities, fetch_all_vendors())
+    except Exception as exc:
+        flash(f"Database comparison failed: {exc}", "error")
+        return redirect(url_for("document_link_results", batch_id=batch_id))
+
+    return render_template(
+        "document_link_db.html",
+        batch_id=batch_id,
+        results=results,
+    )
 
 
 @app.route("/run-process", methods=["POST"])

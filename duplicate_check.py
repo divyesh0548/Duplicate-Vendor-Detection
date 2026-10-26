@@ -375,6 +375,106 @@ def find_document_vs_db_duplicates(
     }
 
 
+LINK_FIELDS = ("name", "phone", "email", "gst", "pan", "msme", "aadhar")
+
+
+def _link_key(field: str, value: Optional[str]) -> Optional[str]:
+    if field == "name":
+        key = normalize_vendor_name(value)
+        return key or None
+    if field == "aadhar":
+        if not value:
+            return None
+        digits = re.sub(r"\D", "", str(value))
+        return digits if len(digits) >= 8 else None
+    normalizer = NORMALIZERS.get(field)
+    if not normalizer:
+        return None
+    return normalizer(value)
+
+
+def find_cross_document_links(entities: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Find values shared by two or more uploaded documents.
+
+    Comparison stays inside this submission. Nothing is written to the database.
+    """
+    groups: List[Dict[str, Any]] = []
+
+    for field in LINK_FIELDS:
+        buckets: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for entity in entities:
+            key = _link_key(field, entity.get(field))
+            if key:
+                buckets[key].append(entity)
+
+        for matched_value, rows in sorted(buckets.items(), key=lambda item: (-len(item[1]), item[0])):
+            sources = {(row.get("source_file") or "") for row in rows}
+            sources.discard("")
+            if len(sources) < 2:
+                continue
+            groups.append(
+                {
+                    "field": field,
+                    "field_label": "Name" if field == "name" else FIELD_LABELS.get(field, field.upper()),
+                    "matched_value": matched_value,
+                    "count": len(rows),
+                    "doc_count": len(sources),
+                    "rows": rows,
+                }
+            )
+
+    return {
+        "groups": groups,
+        "summary": {
+            "group_count": len(groups),
+            "entity_count": len(entities),
+            "doc_count": len({e.get("source_file") for e in entities if e.get("source_file")}),
+        },
+    }
+
+
+def find_entities_vs_database(
+    entities: List[Dict[str, Any]],
+    db_rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Match extracted entities against existing vendor_data rows. No inserts."""
+    groups: List[Dict[str, Any]] = []
+    compare_fields = ("name",) + COMPARE_FIELDS + ("aadhar",)
+
+    for field in compare_fields:
+        buckets: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for entity in entities:
+            key = _link_key(field, entity.get(field))
+            if key:
+                buckets[key].append(entity)
+
+        for matched_value, from_doc in buckets.items():
+            from_db = [
+                row
+                for row in db_rows
+                if _link_key(field, row.get(field)) == matched_value
+            ]
+            if not from_db:
+                continue
+            tagged_doc = [{**row, "_origin": "document"} for row in from_doc]
+            tagged_db = [{**row, "_origin": "database"} for row in from_db]
+            groups.append(
+                {
+                    "field": field,
+                    "field_label": "Name" if field == "name" else FIELD_LABELS.get(field, field.upper()),
+                    "matched_value": matched_value,
+                    "count": len(tagged_doc) + len(tagged_db),
+                    "rows": tagged_doc + sorted(tagged_db, key=lambda r: r.get("id") or 0),
+                }
+            )
+
+    return {
+        "groups": groups,
+        "summary": {"group_count": len(groups), "entity_count": len(entities)},
+    }
+
+
 def find_submission_duplicates(
     submitted: Dict[str, Any],
     existing_rows: List[Dict[str, Any]],

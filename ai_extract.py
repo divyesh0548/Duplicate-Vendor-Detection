@@ -102,6 +102,46 @@ Return ONLY valid JSON with these keys (use null if not found):
 Prefer company/vendor legal name in "name". Prefer mobile in "phone".""",
 }
 
+CROSS_DOC_ENTITY_PROMPT = """You are reading one document that may mention several people and organisations
+(vendor, proprietor, director, signatory, father, mother, spouse, contact person, witness).
+
+Extract EVERY distinct person and organisation, including names that appear only as a relative
+(for example father's name on a PAN or Aadhaar card).
+
+Return ONLY valid JSON:
+{
+  "entities": [
+    {
+      "name": string|null,
+      "role": string|null,
+      "contact_person": string|null,
+      "address": string|null,
+      "city": string|null,
+      "state": string|null,
+      "pincode": string|null,
+      "phone": string|null,
+      "email": string|null,
+      "pan": string|null,
+      "gst": string|null,
+      "msme": string|null,
+      "aadhar": string|null,
+      "rfp_no": string|null,
+      "bank_name": string|null,
+      "beneficiary_name": string|null,
+      "account_no": string|null,
+      "ifsc_code": string|null
+    }
+  ]
+}
+
+Rules:
+- One object per distinct name. Do not drop a person just because they are not the vendor.
+- "role" is a short label such as vendor, father, signatory, contact, proprietor — or null.
+- Attach phone, email, PAN, GST, MSME, Aadhaar only when they clearly belong to that name.
+- Use null when a field is not visible.
+- Skip entries with no name.
+"""
+
 QUOTATION_MULTI_VENDOR_PROMPT = """You are reading a document that may contain one or more vendor quotations
 (look for words/phrases like "quotation", "quote", "price bid", "offer", "techno-commercial offer",
 " Quotation from", letterhead sections, or similar cues that start a new quotation).
@@ -257,7 +297,15 @@ def _call_openrouter(parts: List[Dict[str, Any]], timeout: int = 180) -> str:
         "temperature": 0,
         "messages": [{"role": "user", "content": parts}],
     }
-    response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
+    try:
+        response = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
+    except requests.exceptions.SSLError as exc:
+        raise RuntimeError(
+            "OpenRouter is blocked on this PC. Seqrite Endpoint Security is "
+            "intercepting https://openrouter.ai and returning a block page, so "
+            "the secure connection never starts. Allow openrouter.ai in Seqrite "
+            "Web Security, then upload the documents again."
+        ) from exc
     if response.status_code >= 400:
         raise RuntimeError(
             f"OpenRouter error {response.status_code}: {response.text[:500]}"
@@ -350,6 +398,51 @@ def extract_vendors_from_quotation_document(
 
     if not records:
         raise ValueError("No vendor names could be extracted from the document.")
+    return records
+
+
+def extract_entities_from_document(path: Path) -> List[Dict[str, Optional[str]]]:
+    """
+    Extract every person and organisation mentioned in one document.
+
+    Used by the cross-document link feature. Does not write to the database.
+    """
+    parts: List[Dict[str, Any]] = [
+        {"type": "text", "text": CROSS_DOC_ENTITY_PROMPT},
+        *_file_to_content_parts(path),
+    ]
+    content = _call_openrouter(parts, timeout=180)
+    data = _parse_json_response(content)
+    raw_list = data.get("entities")
+    if not isinstance(raw_list, list):
+        raw_list = data.get("vendors") if isinstance(data.get("vendors"), list) else []
+    raw_entities = [item for item in raw_list if isinstance(item, dict)]
+
+    records: List[Dict[str, Optional[str]]] = []
+    seen = set()
+    for item in raw_entities:
+        record = _normalize_extracted(item)
+        role = item.get("role")
+        if role is not None:
+            role_text = str(role).strip()
+            record["role"] = role_text or None
+        else:
+            record["role"] = None
+        name = (record.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            for idx, existing in enumerate(records):
+                if (existing.get("name") or "").strip().lower() == key:
+                    merged = _merge_fields(existing, record)
+                    if not merged.get("role") and record.get("role"):
+                        merged["role"] = record["role"]
+                    records[idx] = merged
+                    break
+            continue
+        seen.add(key)
+        records.append(record)
     return records
 
 

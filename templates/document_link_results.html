@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}Document Links{% endblock %}
+
+{% block content %}
+<section class="workspace workspace-wide">
+  <div class="page-nav">
+    <a href="{{ url_for('index') }}" class="back-link">← Back to console</a>
+    <a href="{{ url_for('document_links') }}" class="back-link">Upload another set</a>
+  </div>
+
+  <div class="workspace-intro">
+    <h1>Links inside this submission</h1>
+    <p>
+      {{ links.summary.entity_count }} extracted row(s) from {{ links.summary.doc_count }} document(s).
+      A link is the same name, phone, email, GST, PAN, MSME, or Aadhaar appearing in at least two of these files.
+      Rows are not saved until you press +.
+    </p>
+  </div>
+
+  {% if errors %}
+    <div class="flash flash-error">{{ errors|join('; ') }}</div>
+  {% endif %}
+
+  <div class="panel submitted-card">
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-label">Extracted rows</span>
+        <h2 class="panel-title">Not saved yet</h2>
+      </div>
+    </div>
+    <div class="dup-table-wrap">
+      <table class="dup-table extracted-rows-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Document</th>
+            <th>Role</th>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>GST</th>
+            <th>PAN</th>
+            <th>MSME</th>
+            <th>Aadhaar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in entities %}
+            <tr>
+              <td>
+                {% if row.inserted_id %}
+                  <span class="source-pill source-ai" title="Saved">#{{ row.inserted_id }}</span>
+                {% else %}
+                  <form method="post" action="{{ url_for('document_links_add', batch_id=batch_id) }}" class="add-row-form">
+                    <input type="hidden" name="index" value="{{ loop.index0 }}" />
+                    <button type="submit" class="btn-plus" title="Add this row to the database" aria-label="Add this row to the database">+</button>
+                  </form>
+                {% endif %}
+              </td>
+              <td>{{ row.source_file or '—' }}</td>
+              <td>{{ row.role or '—' }}</td>
+              <td><strong>{{ row.name or '—' }}</strong></td>
+              <td>{{ row.phone or '—' }}</td>
+              <td>{{ row.email or '—' }}</td>
+              <td>{{ row.gst or '—' }}</td>
+              <td>{{ row.pan or '—' }}</td>
+              <td>{{ row.msme or '—' }}</td>
+              <td>{{ row.aadhar or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="10">No names were extracted.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="result-summary panel">
+    <div class="summary-stat">
+      <span class="summary-label">Documents</span>
+      <strong>{{ links.summary.doc_count }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Extracted rows</span>
+      <strong>{{ links.summary.entity_count }}</strong>
+    </div>
+    <div class="summary-stat summary-stat-warn">
+      <span class="summary-label">
+        <span class="warn-icon warn-icon-sm" aria-hidden="true">⚠</span>
+        Shared values
+      </span>
+      <strong>{{ links.summary.group_count }}</strong>
+    </div>
+  </div>
+
+  {% if not links.groups %}
+    <div class="panel panel-clear">
+      <div class="clear-state">
+        <span class="clear-icon" aria-hidden="true">✓</span>
+        <div>
+          <h2>No shared values across these documents</h2>
+          <p>No name, phone, email, GST, PAN, MSME, or Aadhaar appeared in more than one file.</p>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="dup-groups">
+      {% for group in links.groups %}
+        <article class="dup-group panel">
+          <header class="dup-group-header">
+            <div class="dup-group-title">
+              <span class="warn-badge">
+                <span class="warn-icon" aria-hidden="true">⚠</span>
+                Shared
+              </span>
+              <div>
+                <span class="dup-field-tag">{{ group.field_label }}</span>
+                <h2 class="dup-matched">{{ group.matched_value }}</h2>
+              </div>
+            </div>
+            <span class="dup-count">{{ group.doc_count }} documents</span>
+          </header>
+          <div class="dup-table-wrap">
+            <table class="dup-table">
+              <thead>
+                <tr>
+                  <th>Document</th>
+                  <th>Role</th>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>GST</th>
+                  <th>PAN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in group.rows %}
+                  <tr>
+                    <td>{{ row.source_file or '—' }}</td>
+                    <td>{{ row.role or '—' }}</td>
+                    <td class="{% if group.field == 'name' %}cell-hit{% endif %}"><strong>{{ row.name or '—' }}</strong></td>
+                    <td class="{% if group.field == 'phone' %}cell-hit{% endif %}">{{ row.phone or '—' }}</td>
+                    <td class="{% if group.field == 'email' %}cell-hit{% endif %}">{{ row.email or '—' }}</td>
+                    <td class="{% if group.field == 'gst' %}cell-hit{% endif %}">{{ row.gst or '—' }}</td>
+                    <td class="{% if group.field == 'pan' %}cell-hit{% endif %}">{{ row.pan or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="form-actions" style="padding: 12px 0 0; justify-content: flex-start;">
+    <a href="{{ url_for('document_links') }}" class="btn btn-ghost">Upload another set</a>
+    <form action="{{ url_for('document_links_compare_db', batch_id=batch_id) }}" method="post">
+      <button type="submit" class="btn btn-primary">Compare with database</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

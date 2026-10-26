@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Link Documents{% endblock %}
+
+{% block content %}
+<section class="workspace">
+  <div class="page-nav">
+    <a href="{{ url_for('index') }}" class="back-link">← Back to console</a>
+  </div>
+
+  <div class="workspace-intro">
+    <h1>Link Documents</h1>
+    <p>
+      Upload two or more PDFs or images in one submission. The tool extracts names, phones, emails, GST, PAN, MSME, and Aadhaar from each file and shows values that appear in more than one document. Nothing is saved to the database until you add a row yourself.
+    </p>
+  </div>
+
+  <form
+    action="{{ url_for('document_links') }}"
+    method="post"
+    enctype="multipart/form-data"
+    class="panel panel-primary vendor-form"
+  >
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-label">Separate from vendor pack</span>
+        <h2 class="panel-title">Multiple documents</h2>
+      </div>
+    </div>
+
+    <div class="doc-grid">
+      <label class="doc-card doc-card-wide" for="link_docs">
+        <span class="doc-card-label">Upload documents</span>
+        <span class="doc-card-hint">At least two files · PDF or images · quotations, PAN, Aadhaar, MSME, and others</span>
+        <input
+          type="file"
+          id="link_docs"
+          name="link_docs"
+          multiple
+          required
+          accept=".pdf,image/*,.png,.jpg,.jpeg,.gif,.webp"
+          data-preview="link-docs-preview"
+        />
+        <span class="file-name" id="link-docs-preview">No files selected</span>
+      </label>
+    </div>
+
+    <div class="form-actions">
+      <a href="{{ url_for('index') }}" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-primary">Find links</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -259,9 +259,30 @@ a {
 /* Large tab components — primary navigation on sparse page */
 .tab-bar {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   padding: 12px 22px 8px;
+}
+
+.btn-plus {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(31, 184, 160, 0.55);
+  background: rgba(31, 184, 160, 0.16);
+  color: #9ff3e4;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-plus:hover {
+  background: rgba(31, 184, 160, 0.28);
+}
+
+.add-row-form {
+  margin: 0;
 }
 
 .tab-btn {
