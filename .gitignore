@@ -26,8 +26,7 @@ uploads/vendor/*
 !uploads/master/.gitkeep
 !uploads/vendor/.gitkeep
 
-# Documents & spreadsheets
-*.pdf
+# Office documents & spreadsheets
 *.doc
 *.docx
 *.xls
