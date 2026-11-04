@@ -25,5 +25,5 @@ Matching rows are clustered (union-find). **Lowest `id` is kept**; the rest are 
 
 ### Code
 
-- Trigger: `app.py` → `_run_exact_dedupe_background`
+- Trigger: `db_dedupe.py` → `run_exact_dedupe_background` (called from `app.py`)
 - Logic: `db_dedupe.py` → `remove_exact_combo_duplicates` (`MIN_OTHER_MATCHING_FIELDS = 3`)

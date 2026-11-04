@@ -101,12 +101,15 @@
         <h2 class="panel-title">Run Process</h2>
         <p>Scan the full database for duplicate mobile, email, GST, MSME, or PAN values (different vendor names).</p>
       </div>
-      <form action="{{ url_for('run_process') }}" method="post">
-        <button type="submit" class="btn btn-primary btn-run">
-          <span class="btn-run-glow" aria-hidden="true"></span>
-          Run Process
-        </button>
-      </form>
+      <div class="action-buttons">
+        <a href="{{ url_for('export_vendors_csv') }}" class="btn btn-secondary">Export CSV</a>
+        <form action="{{ url_for('run_process') }}" method="post">
+          <button type="submit" class="btn btn-primary btn-run">
+            <span class="btn-run-glow" aria-hidden="true"></span>
+            Run Process
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 </section>

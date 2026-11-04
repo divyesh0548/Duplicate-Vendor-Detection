@@ -1,14 +1,16 @@
-import json
+"""Flask entrypoint — routes only. Helpers live in sibling modules."""
+
+from __future__ import annotations
+
 import logging
 import os
-import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from flask import (
     Flask,
+    Response,
     flash,
     redirect,
     render_template,
@@ -35,7 +37,15 @@ from db import (
     insert_vendor_rows,
     insert_vendor_rows_returning_ids,
 )
-from db_dedupe import remove_exact_combo_duplicates
+from db_dedupe import run_exact_dedupe_background
+from document_links_service import (
+    auto_insert_link_entities,
+    cacheable_entity,
+    entities_from_link_cache,
+    link_entity_record,
+    load_link_batch,
+    save_link_batch,
+)
 from duplicate_check import (
     find_cross_document_links,
     find_document_vs_db_duplicates,
@@ -43,7 +53,16 @@ from duplicate_check import (
     find_entities_vs_database,
     find_submission_duplicates,
 )
+from export_csv import vendors_to_csv
 from master_parser import parse_master_file
+from upload_utils import (
+    MASTER_EXTENSIONS,
+    QUOTATION_EXTENSIONS,
+    UPLOAD_MASTER,
+    UPLOAD_VENDOR,
+    ensure_upload_dirs,
+    save_file,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -51,77 +70,13 @@ load_dotenv(BASE_DIR / ".env")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-UPLOAD_MASTER = BASE_DIR / "uploads" / "master"
-UPLOAD_VENDOR = BASE_DIR / "uploads" / "vendor"
-ALLOWED_EXTENSIONS = {
-    "pdf",
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "webp",
-    "xlsx",
-    "xls",
-    "csv",
-    "doc",
-    "docx",
-}
-MASTER_EXTENSIONS = {"xlsx", "xls", "csv"}
-QUOTATION_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "gif", "webp"}
-
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "vendor-data-detection-dev-key")
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 
-UPLOAD_MASTER.mkdir(parents=True, exist_ok=True)
-UPLOAD_VENDOR.mkdir(parents=True, exist_ok=True)
-
+ensure_upload_dirs()
 init_db(reset=False)
-
-_dedupe_lock = threading.Lock()
-_dedupe_running = False
-
-
-def _run_exact_dedupe_background(reason: str = "startup") -> None:
-    """Delete near-exact DB duplicates (same name + ≥3 other fields) in a daemon thread."""
-    global _dedupe_running
-
-    def worker():
-        global _dedupe_running
-        if not _dedupe_lock.acquire(blocking=False):
-            logger.info("Exact combo dedupe skipped (%s) — already running", reason)
-            return
-        _dedupe_running = True
-        try:
-            stats = remove_exact_combo_duplicates()
-            logger.info("Exact combo dedupe (%s): %s", reason, stats)
-        except Exception:
-            logger.exception("Exact combo dedupe failed (%s)", reason)
-        finally:
-            _dedupe_running = False
-            _dedupe_lock.release()
-
-    threading.Thread(target=worker, name=f"dedupe-{reason}", daemon=True).start()
-
-
-# Clean near-exact duplicate rows when the app starts
-_run_exact_dedupe_background("startup")
-
-
-def allowed_file(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def save_file(file_storage, destination_dir: Path, prefix: str = "") -> Optional[str]:
-    if not file_storage or not file_storage.filename:
-        return None
-    if not allowed_file(file_storage.filename):
-        return None
-    safe_name = secure_filename(file_storage.filename)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    final_name = f"{prefix}{stamp}_{safe_name}" if prefix else f"{stamp}_{safe_name}"
-    file_storage.save(destination_dir / final_name)
-    return final_name
+run_exact_dedupe_background("startup")
 
 
 @app.route("/")
@@ -164,9 +119,7 @@ def upload_master():
         flash(f"File saved as {saved}, but import failed: {exc}", "error")
         return redirect(url_for("index"))
 
-    # Re-run near-exact cleanup after bulk excel import
-    _run_exact_dedupe_background("after-master-upload")
-
+    run_exact_dedupe_background("after-master-upload")
     flash(
         f"Master uploaded ({saved}). Detected header row {meta['header_row'] + 1}, "
         f"mapped {len(meta['column_map'])} columns, inserted {inserted} row(s). "
@@ -218,7 +171,6 @@ def _handle_document_only_upload():
             source=SOURCE_AI,
         )
         inserted_rows = fetch_vendors_by_ids(inserted_ids)
-        # Within-document duplicates only — do not use any other DB rows
         results = find_duplicates(inserted_rows)
     except Exception as exc:
         flash(f"Document saved, but extraction/insert failed: {exc}", "error")
@@ -252,8 +204,7 @@ def vendor_docs():
         vendor_dir = UPLOAD_VENDOR / f"{vendor_slug}_{rfp_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         vendor_dir.mkdir(parents=True, exist_ok=True)
 
-        meta_path = vendor_dir / "meta.txt"
-        meta_path.write_text(
+        (vendor_dir / "meta.txt").write_text(
             f"Vendor Name: {vendor_name}\nRFP No: {rfp_no or '-'}\nUploaded At: {datetime.now().isoformat()}\n",
             encoding="utf-8",
         )
@@ -292,9 +243,7 @@ def vendor_docs():
                 saved_docs["other"].append(vendor_dir / saved)
 
         try:
-            # Snapshot existing DB before insert so we don't match the new row
             existing_rows = fetch_all_vendors()
-
             record, extract_errors = extract_vendor_pack(
                 saved_docs,
                 vendor_name=vendor_name,
@@ -307,7 +256,6 @@ def vendor_docs():
             )
             if inserted_ids:
                 record["id"] = inserted_ids[0]
-
             results = find_submission_duplicates(record, existing_rows)
         except Exception as exc:
             flash(
@@ -346,129 +294,12 @@ def compare_quotation_with_db():
         return redirect(url_for("index"))
 
     try:
-        all_rows = fetch_all_vendors()
-        results = find_document_vs_db_duplicates(doc_rows, all_rows)
+        results = find_document_vs_db_duplicates(doc_rows, fetch_all_vendors())
     except Exception as exc:
         flash(f"Database comparison failed: {exc}", "error")
         return redirect(url_for("index"))
 
     return render_template("quotation_db_compare.html", results=results)
-
-
-LINK_ENTITY_INSERT_FIELDS = (
-    "name",
-    "contact_person",
-    "address",
-    "city",
-    "state",
-    "pincode",
-    "phone",
-    "email",
-    "pan",
-    "gst",
-    "msme",
-    "aadhar",
-    "rfp_no",
-    "bank_name",
-    "beneficiary_name",
-    "account_no",
-    "ifsc_code",
-)
-
-
-def _link_batch_path(batch_id: str) -> Path:
-    safe = secure_filename(batch_id)
-    return UPLOAD_VENDOR / safe / "batch.json"
-
-
-def _load_link_batch(batch_id: str) -> Dict[str, Any]:
-    path = _link_batch_path(batch_id)
-    if not path.is_file():
-        raise FileNotFoundError("This document-link batch was not found.")
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _save_link_batch(batch_id: str, payload: Dict[str, Any]) -> None:
-    path = _link_batch_path(batch_id)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _link_entity_record(entity: Dict[str, Any]) -> Dict[str, Any]:
-    return {key: entity.get(key) for key in LINK_ENTITY_INSERT_FIELDS}
-
-
-def _qualifies_for_auto_insert(entity: Dict[str, Any]) -> bool:
-    """Auto-insert when name, phone, and email are all present."""
-    return all(
-        str(entity.get(field) or "").strip() for field in ("name", "phone", "email")
-    )
-
-
-def _auto_insert_link_entities(
-    batch_id: str, entities: List[Dict[str, Any]]
-) -> tuple[int, List[str]]:
-    """
-    Insert rows that have name + phone + email. Always inserts (dedupe is background).
-    Sets inserted_id and insert_status: auto | skipped.
-    """
-    auto_count = 0
-    insert_errors: List[str] = []
-    for entity in entities:
-        if entity.get("inserted_id"):
-            entity.setdefault("insert_status", "auto")
-            continue
-        if not _qualifies_for_auto_insert(entity):
-            entity["inserted_id"] = None
-            entity["insert_status"] = "skipped"
-            continue
-        record = _link_entity_record(entity)
-        try:
-            inserted_ids = insert_vendor_rows_returning_ids(
-                [record],
-                source_file=batch_id,
-                source=SOURCE_AI,
-            )
-            entity["inserted_id"] = inserted_ids[0] if inserted_ids else None
-            entity["insert_status"] = "auto" if entity["inserted_id"] else "skipped"
-            if entity["inserted_id"]:
-                auto_count += 1
-            else:
-                entity["insert_status"] = "skipped"
-        except Exception as exc:
-            entity["inserted_id"] = None
-            entity["insert_status"] = "skipped"
-            insert_errors.append(f"{record.get('name') or 'row'}: {exc}")
-    return auto_count, insert_errors
-
-
-def _entities_from_link_cache(
-    uploads: List[Any],
-    cached_per_file: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Replay cached Link Documents entities onto the current upload filenames."""
-    entities: List[Dict[str, Any]] = []
-    by_name = {
-        str(item.get("filename") or ""): item
-        for item in cached_per_file
-        if isinstance(item, dict)
-    }
-
-    for idx, upload in enumerate(uploads):
-        entry = by_name.get(upload.filename)
-        if entry is None and idx < len(cached_per_file):
-            entry = cached_per_file[idx]
-        if not isinstance(entry, dict):
-            continue
-        for item in entry.get("entities") or []:
-            if not isinstance(item, dict):
-                continue
-            row = dict(item)
-            row["source_file"] = upload.filename
-            row["inserted_id"] = None
-            row["insert_status"] = None
-            entities.append(row)
-
-    return entities
 
 
 @app.route("/document-links", methods=["GET", "POST"])
@@ -487,9 +318,9 @@ def document_links():
     batch_dir = UPLOAD_VENDOR / batch_id
     batch_dir.mkdir(parents=True, exist_ok=True)
 
-    entities: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    saved_names: List[str] = []
+    entities = []
+    errors = []
+    saved_names = []
     accepted_uploads = []
 
     for upload in files:
@@ -514,14 +345,11 @@ def document_links():
     use_cache = link_docs_ai_cache_enabled()
     cached = load_link_docs_ai_cache() if use_cache else None
     cache_used = False
-    cache_per_file: List[Dict[str, Any]] = []
+    cache_per_file = []
 
     if cached:
         cache_used = True
-        entities = _entities_from_link_cache(
-            [u for u, _ in accepted_uploads],
-            cached,
-        )
+        entities = entities_from_link_cache([u for u, _ in accepted_uploads], cached)
         saved_by_name = {u.filename: saved for u, saved in accepted_uploads}
         for entity in entities:
             entity["saved_as"] = saved_by_name.get(entity.get("source_file"))
@@ -541,19 +369,7 @@ def document_links():
                     item["inserted_id"] = None
                     item["insert_status"] = None
                     entities.append(item)
-                    clean_entities.append(
-                        {
-                            k: v
-                            for k, v in item.items()
-                            if k
-                            not in {
-                                "inserted_id",
-                                "insert_status",
-                                "saved_as",
-                                "source_file",
-                            }
-                        }
-                    )
+                    clean_entities.append(cacheable_entity(item))
                 cache_per_file.append(
                     {"filename": upload.filename, "entities": clean_entities}
                 )
@@ -563,28 +379,30 @@ def document_links():
             if save_link_docs_ai_cache_if_empty(cache_per_file):
                 logger.info("Link Documents AI cache filled with %s files", len(cache_per_file))
 
-    auto_count, insert_errors = _auto_insert_link_entities(batch_id, entities)
+    auto_count, insert_errors = auto_insert_link_entities(batch_id, entities)
     errors.extend(insert_errors)
     if auto_count:
-        _run_exact_dedupe_background("after-link-docs")
+        run_exact_dedupe_background("after-link-docs")
 
-    payload = {
-        "batch_id": batch_id,
-        "created_at": datetime.now().isoformat(),
-        "files": saved_names,
-        "entities": entities,
-        "errors": errors,
-        "auto_inserted": auto_count,
-        "cache_used": cache_used,
-    }
-    _save_link_batch(batch_id, payload)
+    save_link_batch(
+        batch_id,
+        {
+            "batch_id": batch_id,
+            "created_at": datetime.now().isoformat(),
+            "files": saved_names,
+            "entities": entities,
+            "errors": errors,
+            "auto_inserted": auto_count,
+            "cache_used": cache_used,
+        },
+    )
     return redirect(url_for("document_link_results", batch_id=batch_id))
 
 
 @app.route("/document-links/<batch_id>")
 def document_link_results(batch_id: str):
     try:
-        payload = _load_link_batch(batch_id)
+        payload = load_link_batch(batch_id)
     except FileNotFoundError:
         flash("Document link results were not found.", "error")
         return redirect(url_for("document_links"))
@@ -611,7 +429,7 @@ def document_link_results(batch_id: str):
 @app.route("/document-links/<batch_id>/add", methods=["POST"])
 def document_links_add(batch_id: str):
     try:
-        payload = _load_link_batch(batch_id)
+        payload = load_link_batch(batch_id)
     except FileNotFoundError:
         flash("Document link batch was not found.", "error")
         return redirect(url_for("document_links"))
@@ -632,7 +450,7 @@ def document_links_add(batch_id: str):
         flash(f"Already saved as row {entity['inserted_id']}.", "success")
         return redirect(results_url)
 
-    record = _link_entity_record(entity)
+    record = link_entity_record(entity)
     if not record.get("name"):
         flash("This row has no name, so it was not added.", "error")
         return redirect(results_url)
@@ -651,7 +469,7 @@ def document_links_add(batch_id: str):
     entity["insert_status"] = "manual" if entity["inserted_id"] else "skipped"
     entities[index] = entity
     payload["entities"] = entities
-    _save_link_batch(batch_id, payload)
+    save_link_batch(batch_id, payload)
     flash(f"Added {record['name']} as row {entity['inserted_id']}.", "success")
     return redirect(results_url)
 
@@ -659,7 +477,7 @@ def document_links_add(batch_id: str):
 @app.route("/document-links/<batch_id>/compare-db", methods=["POST"])
 def document_links_compare_db(batch_id: str):
     try:
-        payload = _load_link_batch(batch_id)
+        payload = load_link_batch(batch_id)
     except FileNotFoundError:
         flash("Document link batch was not found.", "error")
         return redirect(url_for("document_links"))
@@ -678,6 +496,27 @@ def document_links_compare_db(batch_id: str):
     )
 
 
+@app.route("/export/vendors.csv")
+def export_vendors_csv():
+    """Download every vendor_data row as CSV."""
+    try:
+        rows = fetch_all_vendors()
+    except Exception as exc:
+        flash(f"Export failed: {exc}", "error")
+        return redirect(url_for("index"))
+
+    if not rows:
+        flash("No vendor rows in the database to export.", "error")
+        return redirect(url_for("index"))
+
+    csv_text, filename = vendors_to_csv(rows)
+    return Response(
+        csv_text,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.route("/run-process", methods=["POST"])
 def run_process():
     total = count_vendors()
@@ -686,8 +525,7 @@ def run_process():
         return redirect(url_for("index"))
 
     try:
-        rows = fetch_all_vendors()
-        results = find_duplicates(rows)
+        results = find_duplicates(fetch_all_vendors())
     except Exception as exc:
         flash(f"Process failed: {exc}", "error")
         return redirect(url_for("index"))

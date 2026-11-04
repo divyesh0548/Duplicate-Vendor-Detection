@@ -11,6 +11,7 @@ Keeps the lowest id in each cluster and deletes the rest.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from db import delete_vendors_by_ids, fetch_all_vendors
@@ -24,6 +25,9 @@ from duplicate_check import (
 )
 
 logger = logging.getLogger(__name__)
+
+_dedupe_lock = threading.Lock()
+_dedupe_running = False
 
 # Besides matching name, at least this many other fields must match.
 MIN_OTHER_MATCHING_FIELDS = 3
@@ -177,3 +181,25 @@ def remove_exact_combo_duplicates(
     }
     logger.info("Exact combo dedupe finished: %s", stats)
     return stats
+
+
+def run_exact_dedupe_background(reason: str = "startup") -> None:
+    """Delete near-exact DB duplicates in a daemon thread (skips if already running)."""
+    global _dedupe_running
+
+    def worker():
+        global _dedupe_running
+        if not _dedupe_lock.acquire(blocking=False):
+            logger.info("Exact combo dedupe skipped (%s) — already running", reason)
+            return
+        _dedupe_running = True
+        try:
+            stats = remove_exact_combo_duplicates()
+            logger.info("Exact combo dedupe (%s): %s", reason, stats)
+        except Exception:
+            logger.exception("Exact combo dedupe failed (%s)", reason)
+        finally:
+            _dedupe_running = False
+            _dedupe_lock.release()
+
+    threading.Thread(target=worker, name=f"dedupe-{reason}", daemon=True).start()
