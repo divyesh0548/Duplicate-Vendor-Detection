@@ -12,6 +12,7 @@ import json
 import mimetypes
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -27,8 +28,63 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Strong doc/OCR quality at low cost; override with OPENROUTER_MODEL in .env
 DEFAULT_MODEL = "google/gemini-2.5-flash"
 
+# Link Documents only: when LINK_DOCS_AI_CACHE=true, reuse a saved API result
+# instead of calling OpenRouter. Written only while the cache file is empty.
+LINK_DOCS_AI_CACHE_PATH = BASE_DIR / "data" / "link_docs_ai_cache.json"
+
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 PDF_TYPES = {".pdf"}
+
+
+def link_docs_ai_cache_enabled() -> bool:
+    return os.getenv("LINK_DOCS_AI_CACHE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def load_link_docs_ai_cache() -> Optional[List[Dict[str, Any]]]:
+    """
+    Return cached per-file entity lists for Link Documents, or None if unused.
+
+    Expected shape: {"per_file": [{"filename": str, "entities": [dict, ...]}, ...]}
+    """
+    path = LINK_DOCS_AI_CACHE_PATH
+    if not path.is_file():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        if not raw:
+            return None
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return None
+    per_file = data.get("per_file") if isinstance(data, dict) else None
+    if not isinstance(per_file, list) or not per_file:
+        return None
+    return per_file
+
+
+def save_link_docs_ai_cache_if_empty(per_file: List[Dict[str, Any]]) -> bool:
+    """
+    Persist Link Documents AI results only when the cache file is missing or empty.
+    Returns True if this call wrote the file.
+    """
+    if not per_file:
+        return False
+    path = LINK_DOCS_AI_CACHE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if load_link_docs_ai_cache() is not None:
+        return False
+    payload = {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "note": "Dev cache for Link Documents. Clear per_file to force a fresh API call.",
+        "per_file": per_file,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
 
 # Extra keys that map into vendor_data (aadhar is AI-only today).
 AI_FIELD_KEYS = list(VENDOR_DATA_COLUMNS) + ["aadhar"]

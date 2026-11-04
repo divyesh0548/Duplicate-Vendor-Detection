@@ -1,0 +1,11 @@
+We need to define a logic for row insertion in last option "Link Documents".
+
+Currently user has to manually add rows, but it should happen automatically. Here are the rules for it. 
+
+If the vendor name, phone and email all are present then insert that row into DB automatically. And display only those rows which are skipped to be added. For that provide a button for "See all extracted rows", in which display all extracted rows and mark those which are already added into DB, and provide add option for other rows, in case user want to add them.
+
+Just show links found in the documents, show all extracted rows only after user clicks on that button.
+
+For development purpose save the response of AI API in a JSON file (if file empty) and use that same response again in next submission for the "Link documents" only, so It can save unnecessary API calls. Maintain a JSON file for that and provode development flag in .env file.
+
+If I am missing to cover any edge cases then let me know.

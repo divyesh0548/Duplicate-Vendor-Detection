@@ -14,69 +14,17 @@
     <p>
       {{ links.summary.entity_count }} extracted row(s) from {{ links.summary.doc_count }} document(s).
       A link is the same name, phone, email, GST, PAN, MSME, or Aadhaar appearing in at least two of these files.
-      Rows are not saved until you press +.
+      Rows with name, phone, and email were added to the database automatically
+      ({{ auto_inserted }} added · {{ skipped_count }} not added).
+      {% if cache_used %}
+        <span class="source-pill">AI cache</span>
+      {% endif %}
     </p>
   </div>
 
   {% if errors %}
     <div class="flash flash-error">{{ errors|join('; ') }}</div>
   {% endif %}
-
-  <div class="panel submitted-card">
-    <div class="panel-header">
-      <div class="panel-title-group">
-        <span class="panel-label">Extracted rows</span>
-        <h2 class="panel-title">Not saved yet</h2>
-      </div>
-    </div>
-    <div class="dup-table-wrap">
-      <table class="dup-table extracted-rows-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>Document</th>
-            <th>Role</th>
-            <th>Name</th>
-            <th>Phone</th>
-            <th>Email</th>
-            <th>GST</th>
-            <th>PAN</th>
-            <th>MSME</th>
-            <th>Aadhaar</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in entities %}
-            <tr>
-              <td>
-                {% if row.inserted_id %}
-                  <span class="source-pill source-ai" title="Saved">#{{ row.inserted_id }}</span>
-                {% else %}
-                  <form method="post" action="{{ url_for('document_links_add', batch_id=batch_id) }}" class="add-row-form">
-                    <input type="hidden" name="index" value="{{ loop.index0 }}" />
-                    <button type="submit" class="btn-plus" title="Add this row to the database" aria-label="Add this row to the database">+</button>
-                  </form>
-                {% endif %}
-              </td>
-              <td>{{ row.source_file or '—' }}</td>
-              <td>{{ row.role or '—' }}</td>
-              <td><strong>{{ row.name or '—' }}</strong></td>
-              <td>{{ row.phone or '—' }}</td>
-              <td>{{ row.email or '—' }}</td>
-              <td>{{ row.gst or '—' }}</td>
-              <td>{{ row.pan or '—' }}</td>
-              <td>{{ row.msme or '—' }}</td>
-              <td>{{ row.aadhar or '—' }}</td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="10">No names were extracted.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
 
   <div class="result-summary panel">
     <div class="summary-stat">
@@ -86,6 +34,10 @@
     <div class="summary-stat">
       <span class="summary-label">Extracted rows</span>
       <strong>{{ links.summary.entity_count }}</strong>
+    </div>
+    <div class="summary-stat">
+      <span class="summary-label">Auto-added</span>
+      <strong>{{ auto_inserted }}</strong>
     </div>
     <div class="summary-stat summary-stat-warn">
       <span class="summary-label">
@@ -156,11 +108,121 @@
     </div>
   {% endif %}
 
-  <div class="form-actions" style="padding: 12px 0 0; justify-content: flex-start;">
+  <div class="form-actions link-docs-row-toggle" style="padding: 12px 0 0; justify-content: flex-start;">
+    <button
+      type="button"
+      class="btn btn-ghost"
+      id="toggle-extracted-rows"
+      aria-expanded="{{ 'true' if show_all_rows else 'false' }}"
+      aria-controls="all-extracted-rows"
+    >
+      {{ 'Hide extracted rows' if show_all_rows else 'See all extracted rows' }}
+    </button>
     <a href="{{ url_for('document_links') }}" class="btn btn-ghost">Upload another set</a>
     <form action="{{ url_for('document_links_compare_db', batch_id=batch_id) }}" method="post">
       <button type="submit" class="btn btn-primary">Compare with database</button>
     </form>
   </div>
+
+  <div
+    class="panel submitted-card"
+    id="all-extracted-rows"
+    {% if not show_all_rows %}hidden{% endif %}
+  >
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <span class="panel-label">All extracted rows</span>
+        <h2 class="panel-title">Added and skipped</h2>
+      </div>
+      <p class="panel-note">
+        Auto-added when name, phone, and email were all present. Use + to add a skipped row.
+      </p>
+    </div>
+    <div class="dup-table-wrap">
+      <table class="dup-table extracted-rows-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Status</th>
+            <th>Document</th>
+            <th>Role</th>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Email</th>
+            <th>GST</th>
+            <th>PAN</th>
+            <th>MSME</th>
+            <th>Aadhaar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in entities %}
+            <tr class="{% if row.inserted_id %}row-added{% else %}row-skipped{% endif %}">
+              <td>
+                {% if row.inserted_id %}
+                  <span class="source-pill source-ai" title="Saved">#{{ row.inserted_id }}</span>
+                {% else %}
+                  <form method="post" action="{{ url_for('document_links_add', batch_id=batch_id) }}" class="add-row-form">
+                    <input type="hidden" name="index" value="{{ loop.index0 }}" />
+                    <button type="submit" class="btn-plus" title="Add this row to the database" aria-label="Add this row to the database">+</button>
+                  </form>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.insert_status == 'auto' or (row.inserted_id and row.insert_status != 'manual') %}
+                  <span class="status-pill status-added">Added</span>
+                {% elif row.insert_status == 'manual' %}
+                  <span class="status-pill status-added">Added (manual)</span>
+                {% else %}
+                  <span class="status-pill status-skipped">Skipped</span>
+                {% endif %}
+              </td>
+              <td>{{ row.source_file or '—' }}</td>
+              <td>{{ row.role or '—' }}</td>
+              <td><strong>{{ row.name or '—' }}</strong></td>
+              <td>{{ row.phone or '—' }}</td>
+              <td>{{ row.email or '—' }}</td>
+              <td>{{ row.gst or '—' }}</td>
+              <td>{{ row.pan or '—' }}</td>
+              <td>{{ row.msme or '—' }}</td>
+              <td>{{ row.aadhar or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="11">No names were extracted.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var btn = document.getElementById("toggle-extracted-rows");
+    var panel = document.getElementById("all-extracted-rows");
+    if (!btn || !panel) return;
+    btn.addEventListener("click", function () {
+      var open = panel.hasAttribute("hidden");
+      if (open) {
+        panel.removeAttribute("hidden");
+        btn.setAttribute("aria-expanded", "true");
+        btn.textContent = "Hide extracted rows";
+        var url = new URL(window.location.href);
+        url.searchParams.set("show_all", "1");
+        history.replaceState(null, "", url);
+      } else {
+        panel.setAttribute("hidden", "");
+        btn.setAttribute("aria-expanded", "false");
+        btn.textContent = "See all extracted rows";
+        var urlClose = new URL(window.location.href);
+        urlClose.searchParams.delete("show_all");
+        history.replaceState(null, "", urlClose);
+      }
+    });
+  })();
+</script>
 {% endblock %}

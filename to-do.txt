@@ -1,0 +1,1 @@
+In last option of uploading multiple documents, auto insert rows into DB whose email, and phone are present. Skip other.

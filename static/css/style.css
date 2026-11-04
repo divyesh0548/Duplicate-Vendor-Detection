@@ -277,6 +277,39 @@ a {
   font-weight: 600;
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-added {
+  color: #9ff3e4;
+  background: rgba(31, 184, 160, 0.16);
+  border: 1px solid rgba(31, 184, 160, 0.4);
+}
+
+.status-skipped {
+  color: #f0c674;
+  background: rgba(240, 198, 116, 0.12);
+  border: 1px solid rgba(240, 198, 116, 0.35);
+}
+
+.link-docs-row-toggle {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.panel-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .btn-plus:hover {
   background: rgba(31, 184, 160, 0.28);
 }

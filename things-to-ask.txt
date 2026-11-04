@@ -1,2 +1,0 @@
-More then one vendor quotation in single PDF.
-
