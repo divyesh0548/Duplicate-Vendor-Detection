@@ -539,6 +539,18 @@ a {
   gap: 12px;
 }
 
+.action-buttons .btn {
+  min-width: 180px;
+  min-height: 52px;
+  padding: 16px 28px;
+  font-size: 1.05rem;
+  box-sizing: border-box;
+}
+
+.action-buttons form {
+  display: contents;
+}
+
 .action-copy p {
   margin: 8px 0 0;
   color: var(--text-dim);
